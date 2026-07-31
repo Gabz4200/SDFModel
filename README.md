@@ -16,6 +16,11 @@ During training on multi-primitive 3D scenes (containing spheres, boxes, tori, a
 - **Step 2135**: High-frequency surface details refine as coordinate cross-attention grounds spatially onto learnable scene embeddings.
 - **Final Reconstruction**: The network generates smooth, closed 3D isosurface meshes matching the ground truth 4-primitive scene.
 
+### Visual Assets Index
+- `print_from_training_process_1.png`: Step 1055 training snapshot showing initial 3D mesh reconstruction (MSE Loss: 0.000976).
+- `print_from_training_process_2.png`: Step 2135 training snapshot showing refined 3D primitive geometry (MSE Loss: 0.000297).
+- `print_from_training_process_final_result_reconstruction.png`: Final reconstructed 3D scene mesh render.
+
 ---
 
 ## ✨ Key Features
@@ -39,6 +44,9 @@ During training on multi-primitive 3D scenes (containing spheres, boxes, tori, a
 
 ```text
 SDFModel/
+├── print_from_training_process_1.png                            # Live training 3D mesh snapshot (Step 1055)
+├── print_from_training_process_2.png                            # Live training 3D mesh snapshot (Step 2135)
+├── print_from_training_process_final_result_reconstruction.png  # Final 3D scene reconstruction result
 ├── configs/
 │   └── default.yaml          # Default experiment configuration
 ├── scripts/
