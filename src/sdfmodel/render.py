@@ -158,3 +158,62 @@ def render_sdf_3d(
         plt.show()
 
     return triangles
+
+
+class LiveSDFViewer:
+    """Interactive Matplotlib viewer updating 2D SDF slice renderings dynamically during training."""
+
+    def __init__(
+        self,
+        title: str = "Live Scene SDF Reconstruction",
+        resolution: int = 128,
+        slice_axis: str = "z",
+        slice_pos: float = 0.0,
+    ) -> None:
+        self.resolution = resolution
+        self.title = title
+        self.slice_axis = slice_axis
+        self.slice_pos = slice_pos
+
+        self.fig, self.ax = plt.subplots(figsize=(6, 5))
+        self.im: Any = None
+        plt.ion()
+        self.fig.show()
+
+    def update(self, sdf_obj: sdf.d3.SDF3, step: int, loss: float) -> None:
+        x_val = self.slice_pos if self.slice_axis == "x" else None
+        y_val = self.slice_pos if self.slice_axis == "y" else None
+        z_val = self.slice_pos if self.slice_axis == "z" else None
+
+        grid, extent, axes = sdf.core.sample_slice(
+            sdf_obj,
+            w=self.resolution,
+            h=self.resolution,
+            x=x_val,
+            y=y_val,
+            z=z_val,
+            bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+        )
+
+        if self.im is None:
+            self.im = self.ax.imshow(
+                grid,
+                extent=extent,
+                origin="lower",
+                cmap="twilight_shifted",
+            )
+            self.ax.set_xlabel(f"{axes[0]} axis")
+            self.ax.set_ylabel(f"{axes[1]} axis")
+            self.fig.colorbar(self.im, ax=self.ax, label="Signed Distance")
+        else:
+            self.im.set_data(grid)
+            self.im.set_clim(vmin=grid.min(), vmax=grid.max())
+
+        self.ax.set_title(f"{self.title}\n(Step {step} | MSE Loss {loss:.6f})")
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
+        plt.pause(0.01)
+
+    def close(self) -> None:
+        plt.ioff()
+        plt.close(self.fig)
