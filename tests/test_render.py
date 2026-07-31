@@ -1,9 +1,17 @@
 import os
 
+import matplotlib
 import numpy as np
 
+matplotlib.use("Agg")
+
 from sdfmodel.models import SDFMLP, CrossAttnSDFModel
-from sdfmodel.render import create_sdf3_wrapper, export_sdf_mesh, render_sdf_slice
+from sdfmodel.render import (
+    LiveSDFViewer,
+    create_sdf3_wrapper,
+    export_sdf_mesh,
+    render_sdf_slice,
+)
 
 
 def test_create_sdf3_wrapper_cross_attn() -> None:
@@ -44,3 +52,16 @@ def test_export_sdf_mesh(tmp_path) -> None:
     output_path = tmp_path / "test_sphere.stl"
     export_sdf_mesh(sdf_obj, str(output_path), step=0.5, verbose=False)
     assert os.path.exists(output_path)
+
+
+def test_live_sdf_viewer_modes() -> None:
+    model = SDFMLP(in_features=3, hidden_features=32, num_layers=2)
+    sdf_obj = create_sdf3_wrapper(model)
+
+    viewer_2d = LiveSDFViewer(view_mode="2d", resolution=32)
+    viewer_2d.update(sdf_obj, step=1, loss=0.5)
+    viewer_2d.close()
+
+    viewer_3d = LiveSDFViewer(view_mode="3d", step=0.5)
+    viewer_3d.update(sdf_obj, step=1, loss=0.5)
+    viewer_3d.close()

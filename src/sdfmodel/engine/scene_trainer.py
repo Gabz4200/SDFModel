@@ -17,7 +17,7 @@ class SceneTrainer:
         dataloader: DataLoader,
         optimizer: Optimizer,
         device: str = "cpu",
-        view: bool = False,
+        view: str | bool | None = None,
         render_every_steps: int = 5,
         render_resolution: int = 128,
     ) -> None:
@@ -26,14 +26,22 @@ class SceneTrainer:
         self.dataloader = dataloader
         self.optimizer = optimizer
         self.device = device
-        self.view = view
         self.render_every_steps = render_every_steps
         self.criterion = nn.MSELoss()
 
+        view_mode: str | None = None
+        if isinstance(view, str):
+            view_mode = view if view in ("2d", "3d") else "3d"
+        elif isinstance(view, bool) and view:
+            view_mode = "3d"
+
+        self.view = view_mode is not None
         self.viewer: LiveSDFViewer | None = None
-        if self.view:
+        if self.view and view_mode is not None:
             self.viewer = LiveSDFViewer(
-                title="Scene SDF Live Training", resolution=render_resolution
+                title="Scene SDF Live Training",
+                resolution=render_resolution,
+                view_mode=view_mode,
             )
 
     def train_step(

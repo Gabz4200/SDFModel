@@ -30,11 +30,12 @@ def main() -> int:
         help="SDF model variant to evaluate",
     )
     parser.add_argument(
-        "--mode",
-        type=str,
-        default="slice",
-        choices=["slice", "3d", "mesh"],
-        help="Rendering mode: 2D slice, 3D interactive mesh view, or mesh export",
+        "--view",
+        nargs="?",
+        const="3d",
+        default=None,
+        choices=["2d", "3d"],
+        help="Visualization view mode: '2d' slice or '3d' isosurface mesh (defaults to '3d' if --view is specified without value)",
     )
     parser.add_argument(
         "--hidden-dim",
@@ -138,7 +139,12 @@ def main() -> int:
     y_val = args.slice_pos if args.slice_axis == "y" else None
     z_val = args.slice_pos if args.slice_axis == "z" else None
 
-    if args.mode == "slice":
+    # Determine rendering mode from --view or fallback --mode
+    view_mode = args.view
+    if view_mode is None:
+        view_mode = "2d" if args.mode == "slice" else "3d"
+
+    if view_mode == "2d":
         print(
             f"Rendering 2D SDF slice along {args.slice_axis.upper()}={args.slice_pos} at {args.resolution}x{args.resolution} resolution..."
         )
@@ -152,12 +158,12 @@ def main() -> int:
             title=f"SDF Slice ({args.model}, {args.slice_axis.upper()}={args.slice_pos})",
         )
 
-    elif args.mode in ("3d", "mesh"):
+    else:
         print(f"Extracting 3D isosurface mesh with step size {args.step}...")
         triangles = render_sdf_3d(
             sdf_obj,
             step=args.step,
-            show=(args.mode == "3d"),
+            show=True,
             title=f"3D SDF Isosurface Mesh ({args.model})",
         )
         print(f"Generated {len(triangles)} triangles in 3D mesh.")

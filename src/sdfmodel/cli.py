@@ -100,7 +100,11 @@ def run_render(args: argparse.Namespace) -> int:
     y_val = args.slice_pos if args.slice_axis == "y" else None
     z_val = args.slice_pos if args.slice_axis == "z" else None
 
-    if args.mode == "slice":
+    view_mode = args.view
+    if view_mode is None:
+        view_mode = "2d" if args.mode == "slice" else "3d"
+
+    if view_mode == "2d":
         print(
             f"Rendering 2D SDF slice along {args.slice_axis.upper()}={args.slice_pos} at {args.resolution}x{args.resolution} resolution..."
         )
@@ -114,12 +118,12 @@ def run_render(args: argparse.Namespace) -> int:
             title=f"SDF Slice ({args.model}, {args.slice_axis.upper()}={args.slice_pos})",
         )
 
-    elif args.mode in ("3d", "mesh"):
+    else:
         print(f"Extracting 3D isosurface mesh with step size {args.step}...")
         triangles = render_sdf_3d(
             sdf_obj,
             step=args.step,
-            show=(args.mode == "3d"),
+            show=True,
             title=f"3D SDF Isosurface Mesh ({args.model})",
         )
         print(f"Generated {len(triangles)} triangles in 3D mesh.")
@@ -316,6 +320,14 @@ def main() -> int:
         default=None,
         help="Path to PyTorch model checkpoint (.pt or .pth)",
     )
+    render_parser.add_argument(
+        "--view",
+        nargs="?",
+        const="3d",
+        default=None,
+        choices=["2d", "3d"],
+        help="Visualization view mode: '2d' slice or '3d' isosurface mesh (defaults to '3d' if --view is specified without value)",
+    )
 
     # Train scene command
     scene_parser = subparsers.add_parser(
@@ -342,8 +354,11 @@ def main() -> int:
     )
     scene_parser.add_argument(
         "--view",
-        action="store_true",
-        help="Open live window showing SDF reconstruction updating during training",
+        nargs="?",
+        const="3d",
+        default=None,
+        choices=["2d", "3d"],
+        help="Open live window showing SDF reconstruction updating during training ('2d' slice or '3d' mesh, defaults to '3d')",
     )
     scene_parser.add_argument(
         "--render-every-steps",

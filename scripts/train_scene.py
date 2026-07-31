@@ -41,8 +41,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--view",
-        action="store_true",
-        help="Open live window showing SDF reconstruction updating during training",
+        nargs="?",
+        const="3d",
+        default=None,
+        choices=["2d", "3d"],
+        help="Open live window showing SDF reconstruction updating during training ('2d' slice or '3d' mesh, defaults to '3d')",
     )
     parser.add_argument(
         "--render-every-steps",

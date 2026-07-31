@@ -161,55 +161,102 @@ def render_sdf_3d(
 
 
 class LiveSDFViewer:
-    """Interactive Matplotlib viewer updating 2D SDF slice renderings dynamically during training."""
+    """Interactive Matplotlib viewer updating 2D slice or 3D mesh SDF renderings dynamically during training."""
 
     def __init__(
         self,
         title: str = "Live Scene SDF Reconstruction",
         resolution: int = 128,
+        step: float = 0.08,
         slice_axis: str = "z",
         slice_pos: float = 0.0,
+        view_mode: str = "3d",
     ) -> None:
         self.resolution = resolution
+        self.step = step
         self.title = title
         self.slice_axis = slice_axis
         self.slice_pos = slice_pos
+        self.view_mode = view_mode if view_mode in ("2d", "3d") else "3d"
 
-        self.fig, self.ax = plt.subplots(figsize=(6, 5))
+        self.fig = plt.figure(figsize=(7, 6))
         self.im: Any = None
+        self.mesh_collection: Any = None
+        self.ax: Any = None
+
+        if self.view_mode == "3d":
+            self.ax = self.fig.add_subplot(111, projection="3d")
+            self.ax.set_xlim(-1.0, 1.0)
+            self.ax.set_ylim(-1.0, 1.0)
+            self.ax.set_zlim(-1.0, 1.0)
+            self.ax.set_xlabel("X")
+            self.ax.set_ylabel("Y")
+            self.ax.set_zlabel("Z")
+        else:
+            self.ax = self.fig.add_subplot(111)
+
         plt.ion()
         self.fig.show()
 
     def update(self, sdf_obj: sdf.d3.SDF3, step: int, loss: float) -> None:
-        x_val = self.slice_pos if self.slice_axis == "x" else None
-        y_val = self.slice_pos if self.slice_axis == "y" else None
-        z_val = self.slice_pos if self.slice_axis == "z" else None
-
-        grid, extent, axes = sdf.core.sample_slice(
-            sdf_obj,
-            w=self.resolution,
-            h=self.resolution,
-            x=x_val,
-            y=y_val,
-            z=z_val,
-            bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
-        )
-
-        if self.im is None:
-            self.im = self.ax.imshow(
-                grid,
-                extent=extent,
-                origin="lower",
-                cmap="twilight_shifted",
+        if self.view_mode == "3d":
+            points = sdf.core.generate(
+                sdf_obj,
+                step=self.step,
+                bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+                verbose=False,
             )
-            self.ax.set_xlabel(f"{axes[0]} axis")
-            self.ax.set_ylabel(f"{axes[1]} axis")
-            self.fig.colorbar(self.im, ax=self.ax, label="Signed Distance")
-        else:
-            self.im.set_data(grid)
-            self.im.set_clim(vmin=grid.min(), vmax=grid.max())
+            triangles = np.array(points).reshape(-1, 3, 3)
 
-        self.ax.set_title(f"{self.title}\n(Step {step} | MSE Loss {loss:.6f})")
+            if self.mesh_collection is not None:
+                self.mesh_collection.remove()
+                self.mesh_collection = None
+
+            if len(triangles) > 0:
+                from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+                self.mesh_collection = Poly3DCollection(
+                    triangles, alpha=0.8, edgecolor="k", linewidths=0.1
+                )
+                self.mesh_collection.set_facecolor([0.2, 0.6, 1.0])
+                self.ax.add_collection3d(self.mesh_collection)
+
+            self.ax.set_title(
+                f"{self.title} (3D Mesh)\n(Step {step} | MSE Loss {loss:.6f})"
+            )
+        else:
+            x_val = self.slice_pos if self.slice_axis == "x" else None
+            y_val = self.slice_pos if self.slice_axis == "y" else None
+            z_val = self.slice_pos if self.slice_axis == "z" else None
+
+            grid, extent, axes = sdf.core.sample_slice(
+                sdf_obj,
+                w=self.resolution,
+                h=self.resolution,
+                x=x_val,
+                y=y_val,
+                z=z_val,
+                bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+            )
+
+            if self.im is None:
+                self.im = self.ax.imshow(
+                    grid,
+                    extent=extent,
+                    origin="lower",
+                    cmap="twilight_shifted",
+                )
+                self.ax.set_xlabel(f"{axes[0]} axis")
+                self.ax.set_ylabel(f"{axes[1]} axis")
+                self.fig.colorbar(self.im, ax=self.ax, label="Signed Distance")
+            else:
+                self.im.set_data(grid)
+                self.im.set_clim(vmin=grid.min(), vmax=grid.max())
+
+            self.ax.set_title(
+                f"{self.title} (2D Slice)\n(Step {step} | MSE Loss {loss:.6f})"
+            )
+
         self.fig.canvas.draw_idle()
         self.fig.canvas.flush_events()
         plt.pause(0.01)
