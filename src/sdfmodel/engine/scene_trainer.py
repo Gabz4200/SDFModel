@@ -52,16 +52,29 @@ class SceneTrainer:
         target_sdf = target_sdf.to(self.device)
         batch_size = points.shape[0]
 
-        # Expand (1, 4, hidden_dim) embeddings to (batch_size, 4, hidden_dim)
         batch_embeddings = self.learnable_embeddings.expand(batch_size, -1, -1)
 
+        # Directional finite difference for Eikonal loss + L1 + MSE surface penalization
+        eps = 1e-3
+        v = torch.randn_like(points)
+        v = v / (v.norm(dim=-1, keepdim=True) + 1e-8)
+
+        pred_p1 = self.model(points + eps * v, batch_embeddings)
+        pred_p2 = self.model(points - eps * v, batch_embeddings)
+        gv = (pred_p1 - pred_p2) / (2 * eps)
+
+        eikonal_loss = torch.mean((torch.abs(gv) - 1.0) ** 2)
+        pred_sdf = (pred_p1 + pred_p2) / 2.0
+        mse_loss = self.criterion(pred_sdf, target_sdf)
+        l1_loss = torch.nn.functional.l1_loss(pred_sdf, target_sdf)
+
+        loss = mse_loss + 0.5 * l1_loss + 0.1 * eikonal_loss
+
         self.optimizer.zero_grad()
-        pred_sdf = self.model(points, batch_embeddings)
-        loss = self.criterion(pred_sdf, target_sdf)
         loss.backward()
         self.optimizer.step()
 
-        loss_val = float(loss.item())
+        loss_val = float(mse_loss.item())
 
         if (
             self.view
@@ -77,7 +90,7 @@ class SceneTrainer:
 
         return loss_val
 
-    def close(self) -> None:
+    def close(self, keep_open: bool = True) -> None:
         if self.viewer is not None:
-            self.viewer.close()
+            self.viewer.close(keep_open=keep_open)
             self.viewer = None

@@ -96,11 +96,13 @@ class CrossAttnSDFModel(BaseModel):
         ffn_ratio: float = 4.0,
         fourier_num_bands: int = 6,
         dropout: float = 0.0,
+        use_tanh: bool = False,
     ) -> None:
         super().__init__()
         self.in_features = in_features
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
+        self.use_tanh = use_tanh
 
         self.fourier_pe = FourierPositionEncoding(
             in_features=in_features, num_bands=fourier_num_bands
@@ -125,6 +127,8 @@ class CrossAttnSDFModel(BaseModel):
 
         self.final_norm = nn.LayerNorm(hidden_dim)
         self.dist_head = nn.Linear(hidden_dim, 1)
+        nn.init.normal_(self.dist_head.weight, std=0.01)
+        nn.init.zeros_(self.dist_head.bias)
 
     @staticmethod
     def create_learnable_embedding(
@@ -177,6 +181,8 @@ class CrossAttnSDFModel(BaseModel):
 
         cords_embed = self.final_norm(cords_embed)
         dist = self.dist_head(cords_embed)
+        if self.use_tanh:
+            dist = torch.tanh(dist)
 
         if is_2d:
             dist = dist.squeeze(1)

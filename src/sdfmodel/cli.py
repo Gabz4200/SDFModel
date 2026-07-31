@@ -201,7 +201,7 @@ def run_train_scene(args: argparse.Namespace) -> int:
             print(f"Epoch [{epoch}/{args.epochs}] | Avg MSE Loss: {avg_loss:.6f}")
 
     finally:
-        trainer.close()
+        trainer.close(keep_open=args.view is not None)
 
     print("Scene training finished!")
 

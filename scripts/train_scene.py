@@ -136,7 +136,7 @@ def main() -> int:
             print(f"Epoch [{epoch}/{args.epochs}] | Avg MSE Loss: {avg_loss:.6f}")
 
     finally:
-        trainer.close()
+        trainer.close(keep_open=args.view is not None)
 
     print("Training finished!")
 

@@ -131,8 +131,22 @@ def render_sdf_3d(
     """Extract 3D isosurface mesh points and render interactively using matplotlib mplot3d."""
     from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-    points = sdf.core.generate(sdf_obj, step=step, bounds=bounds, verbose=False)
+    points = sdf.core.generate(
+        sdf_obj, step=step, bounds=bounds, sparse=False, verbose=False
+    )
     triangles = np.array(points).reshape(-1, 3, 3)
+
+    if len(triangles) == 0:
+
+        def fallback_eval(p: np.ndarray) -> np.ndarray:
+            raw = sdf_obj(p)
+            return raw - np.median(raw)
+
+        fallback_obj = sdf.d3.SDF3(fallback_eval)
+        points = sdf.core.generate(
+            fallback_obj, step=step, bounds=bounds, sparse=False, verbose=False
+        )
+        triangles = np.array(points).reshape(-1, 3, 3)
 
     if show and len(triangles) > 0:
         fig = plt.figure(figsize=(8, 7))
@@ -167,7 +181,7 @@ class LiveSDFViewer:
         self,
         title: str = "Live Scene SDF Reconstruction",
         resolution: int = 128,
-        step: float = 0.08,
+        step: float = 0.12,
         slice_axis: str = "z",
         slice_pos: float = 0.0,
         view_mode: str = "3d",
@@ -204,9 +218,26 @@ class LiveSDFViewer:
                 sdf_obj,
                 step=self.step,
                 bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+                sparse=False,
                 verbose=False,
             )
             triangles = np.array(points).reshape(-1, 3, 3)
+
+            if len(triangles) == 0:
+
+                def fallback_eval(p: np.ndarray) -> np.ndarray:
+                    raw = sdf_obj(p)
+                    return raw - np.median(raw)
+
+                fallback_obj = sdf.d3.SDF3(fallback_eval)
+                points = sdf.core.generate(
+                    fallback_obj,
+                    step=self.step,
+                    bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+                    sparse=False,
+                    verbose=False,
+                )
+                triangles = np.array(points).reshape(-1, 3, 3)
 
             if self.mesh_collection is not None:
                 self.mesh_collection.remove()
@@ -261,6 +292,12 @@ class LiveSDFViewer:
         self.fig.canvas.flush_events()
         plt.pause(0.01)
 
-    def close(self) -> None:
-        plt.ioff()
-        plt.close(self.fig)
+    def close(self, keep_open: bool = True) -> None:
+        if keep_open and plt.fignum_exists(self.fig.number):
+            plt.ioff()
+            self.ax.set_title(f"{self.title} (Final Reconstruction)")
+            self.fig.canvas.draw_idle()
+            plt.show()
+        else:
+            plt.ioff()
+            plt.close(self.fig)
