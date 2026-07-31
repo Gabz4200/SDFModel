@@ -2,24 +2,42 @@
 
 **SDFModel** is a PyTorch framework for learning, evaluating, and visualizing **Implicit Neural Representations** and **Signed Distance Fields (SDF)**. It integrates spatial Fourier feature embeddings, transformer cross-attention mechanisms over scene object tokens, and seamless integration with the `fogleman/sdf` engine for fast 2D slice sampling, 3D Marching Cubes isosurface mesh generation, live interactive training visualizations, and 3D STL/OBJ mesh exports.
 
+<p align="center">
+  <img src="print_from_training_process_final_result_reconstruction.png" alt="SDFModel 3D Scene Reconstruction" width="900" />
+</p>
+
 ---
 
 ## 🌟 Training Visualization & Live 3D Scene Reconstruction
 
-During training on multi-primitive 3D scenes (containing spheres, boxes, tori, and cylinders), `SceneTrainer` streams live 3D Marching Cubes isosurface reconstructions in real time. The progression below highlights how the implicit neural field sharpens as the Mean Squared Error (MSE) loss decreases:
+During training on multi-primitive 3D scenes (containing spheres, boxes, tori, and cylinders), `SceneTrainer` streams live 3D Marching Cubes isosurface reconstructions in real time.
 
-| Step 1055 (MSE Loss: 0.000976) | Step 2135 (MSE Loss: 0.000297) | Final Reconstruction |
-| :---: | :---: | :---: |
-| ![Step 1055 Training](print_from_training_process_1.png) | ![Step 2135 Training](print_from_training_process_2.png) | ![Final Reconstruction](print_from_training_process_final_result_reconstruction.png) |
+### 🖼️ Live Training Progress & Reconstructions
 
-- **Step 1055**: Primitive boundaries (sphere, box, torus, capped cylinder) emerge from uniform and near-surface point sampling.
-- **Step 2135**: High-frequency surface details refine as coordinate cross-attention grounds spatially onto learnable scene embeddings.
-- **Final Reconstruction**: The network generates smooth, closed 3D isosurface meshes matching the ground truth 4-primitive scene.
+#### 1. Initial Surface Formation (Step 1055 — MSE Loss: 0.000976)
+Primitive boundaries (sphere, box, torus, capped cylinder) emerge from uniform and near-surface point sampling:
 
-### Visual Assets Index
-- `print_from_training_process_1.png`: Step 1055 training snapshot showing initial 3D mesh reconstruction (MSE Loss: 0.000976).
-- `print_from_training_process_2.png`: Step 2135 training snapshot showing refined 3D primitive geometry (MSE Loss: 0.000297).
-- `print_from_training_process_final_result_reconstruction.png`: Final reconstructed 3D scene mesh render.
+<p align="center">
+  <img src="print_from_training_process_1.png" alt="Step 1055 Training" width="900" />
+</p>
+
+---
+
+#### 2. High-Frequency Surface Refinement (Step 2135 — MSE Loss: 0.000297)
+High-frequency surface details refine as coordinate cross-attention grounds spatially onto learnable scene embeddings:
+
+<p align="center">
+  <img src="print_from_training_process_2.png" alt="Step 2135 Training" width="900" />
+</p>
+
+---
+
+#### 3. Final 3D Scene Isosurface Reconstruction
+The network generates smooth, closed 3D isosurface meshes matching the ground truth 4-primitive scene:
+
+<p align="center">
+  <img src="print_from_training_process_final_result_reconstruction.png" alt="Final Reconstruction" width="900" />
+</p>
 
 ---
 
