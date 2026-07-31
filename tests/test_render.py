@@ -10,6 +10,7 @@ from sdfmodel.render import (
     LiveSDFViewer,
     create_sdf3_wrapper,
     export_sdf_mesh,
+    render_interactive_interpolation,
     render_sdf_slice,
 )
 
@@ -65,3 +66,25 @@ def test_live_sdf_viewer_modes() -> None:
     viewer_3d = LiveSDFViewer(view_mode="3d", step=0.5)
     viewer_3d.update(sdf_obj, step=1, loss=0.5)
     viewer_3d.close()
+
+
+def test_render_interactive_interpolation() -> None:
+    hidden_dim = 32
+    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=2, num_heads=2)
+    embeddings = CrossAttnSDFModel.create_learnable_embedding(1, 4, hidden_dim)
+
+    # Calling with plt.show mocked/agg shouldn't raise any errors
+    render_interactive_interpolation(
+        model=model,
+        embeddings=embeddings,
+        step=0.5,
+        resolution=32,
+        view_mode="2d",
+    )
+    render_interactive_interpolation(
+        model=model,
+        embeddings=embeddings,
+        step=0.5,
+        resolution=32,
+        view_mode="3d",
+    )

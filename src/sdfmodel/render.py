@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -301,3 +301,146 @@ class LiveSDFViewer:
         else:
             plt.ioff()
             plt.close(self.fig)
+
+
+def render_interactive_interpolation(
+    model: nn.Module,
+    embeddings: torch.Tensor,
+    step: float = 0.10,
+    resolution: int = 128,
+    view_mode: str = "3d",
+    device: str = "cpu",
+    title: str = "Interactive Primitive Embedding Interpolation",
+) -> None:
+    """Render an interactive Matplotlib GUI window with sliders to interpolate object embeddings in real time."""
+    from matplotlib.widgets import Slider
+
+    model = model.to(device).eval()
+    base_emb = embeddings.detach().to(device)
+    if base_emb.ndim == 2:
+        base_emb = base_emb.unsqueeze(0)
+
+    num_objs = base_emb.shape[1]
+    alphas = [0.0] * num_objs
+
+    fig = plt.figure(figsize=(9, 8))
+    ax: Any = None
+
+    if view_mode == "3d":
+        ax = cast(Any, fig.add_axes((0.1, 0.28, 0.8, 0.68), projection="3d"))
+        ax.set_xlim(-1.0, 1.0)
+        ax.set_ylim(-1.0, 1.0)
+        ax.set_zlim(-1.0, 1.0)
+        ax.set_xlabel("X")
+        ax.set_ylabel("Y")
+        ax.set_zlabel("Z")
+    else:
+        ax = cast(Any, fig.add_axes((0.15, 0.28, 0.7, 0.68)))
+
+    slider_axes = [
+        fig.add_axes((0.25, 0.20 - i * 0.04, 0.55, 0.03)) for i in range(num_objs)
+    ]
+    sliders = [
+        Slider(
+            slider_axes[i],
+            f"Primitive {i + 1} Blend",
+            0.0,
+            1.0,
+            valinit=0.0,
+            valfmt="%.2f",
+        )
+        for i in range(num_objs)
+    ]
+
+    current_mesh: Any = None
+    current_im: Any = None
+
+    def compute_interpolated_embeddings() -> torch.Tensor:
+        current_emb = base_emb.clone()
+        for i in range(num_objs):
+            a = alphas[i]
+            target_idx = (i + 1) % num_objs
+            current_emb[0, i] = (1.0 - a) * base_emb[0, i] + a * base_emb[0, target_idx]
+        return current_emb
+
+    def update_render(_val: float | None = None) -> None:
+        nonlocal current_mesh, current_im
+        for i in range(num_objs):
+            alphas[i] = float(sliders[i].val)
+
+        curr_emb = compute_interpolated_embeddings()
+        sdf_obj = create_sdf3_wrapper(model, embedding=curr_emb, device=device)
+
+        if view_mode == "3d":
+            points = sdf.core.generate(
+                sdf_obj,
+                step=step,
+                bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+                sparse=False,
+                verbose=False,
+            )
+            triangles = np.array(points).reshape(-1, 3, 3)
+
+            if len(triangles) == 0:
+
+                def fallback_eval(p: np.ndarray) -> np.ndarray:
+                    raw = sdf_obj(p)
+                    return raw - np.median(raw)
+
+                fallback_obj = sdf.d3.SDF3(fallback_eval)
+                points = sdf.core.generate(
+                    fallback_obj,
+                    step=step,
+                    bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+                    sparse=False,
+                    verbose=False,
+                )
+                triangles = np.array(points).reshape(-1, 3, 3)
+
+            if current_mesh is not None:
+                current_mesh.remove()
+                current_mesh = None
+
+            if len(triangles) > 0:
+                from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+                current_mesh = Poly3DCollection(
+                    triangles, alpha=0.85, edgecolor="k", linewidths=0.1
+                )
+                current_mesh.set_facecolor([0.2, 0.6, 1.0])
+                ax.add_collection3d(current_mesh)
+
+            alpha_str = ", ".join(f"P{i + 1}:{a:.2f}" for i, a in enumerate(alphas))
+            ax.set_title(f"{title} (3D)\n({alpha_str})")
+        else:
+            grid, extent, axes = sdf.core.sample_slice(
+                sdf_obj,
+                w=resolution,
+                h=resolution,
+                z=0.0,
+                bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+            )
+            if current_im is None:
+                current_im = ax.imshow(
+                    grid,
+                    extent=extent,
+                    origin="lower",
+                    cmap="twilight_shifted",
+                )
+                ax.set_xlabel(f"{axes[0]} axis")
+                ax.set_ylabel(f"{axes[1]} axis")
+                fig.colorbar(current_im, ax=ax, label="Signed Distance")
+            else:
+                current_im.set_data(grid)
+                current_im.set_clim(vmin=grid.min(), vmax=grid.max())
+
+            alpha_str = ", ".join(f"P{i + 1}:{a:.2f}" for i, a in enumerate(alphas))
+            ax.set_title(f"{title} (2D Slice)\n({alpha_str})")
+
+        fig.canvas.draw_idle()
+
+    for s in sliders:
+        s.on_changed(update_render)
+
+    update_render()
+    plt.show()
