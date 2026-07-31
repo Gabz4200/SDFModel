@@ -1,4 +1,6 @@
+from collections.abc import Sized
 from pathlib import Path
+from typing import cast
 
 import torch
 from torch import nn
@@ -64,7 +66,8 @@ class Trainer:
                 loss = self.criterion(pred_sdf, target_sdf)
 
             if self.use_amp:
-                self.scaler.scale(loss).backward()
+                scaled_loss = cast(torch.Tensor, self.scaler.scale(loss))
+                scaled_loss.backward()
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
@@ -74,7 +77,8 @@ class Trainer:
             total_loss += loss.item() * points.size(0)
 
         self.scheduler.step()
-        return total_loss / len(self.train_loader.dataset)
+        dataset = cast(Sized, self.train_loader.dataset)
+        return total_loss / len(dataset)
 
     @torch.no_grad()
     def evaluate(self) -> dict[str, float]:

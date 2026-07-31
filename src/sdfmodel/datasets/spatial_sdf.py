@@ -28,8 +28,8 @@ class SyntheticSDFDataset(Dataset):
     def __len__(self) -> int:
         return self.num_samples
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        return self.points[idx], self.sdfs[idx]
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+        return self.points[index], self.sdfs[index]
 
 
 def build_dataloaders(

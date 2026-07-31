@@ -1,0 +1,17 @@
+# Pyrefly configuration for SDFModel (PyTorch Research)
+
+project-includes = [
+    "src/**/*.py",
+    "tests/**/*.py",
+    "scripts/**/*.py",
+]
+
+project-excludes = [
+    "**/__pycache__",
+    ".venv/**",
+    "build/**",
+    "dist/**",
+]
+
+python-version = "3.13"
+python-platform = "linux"
