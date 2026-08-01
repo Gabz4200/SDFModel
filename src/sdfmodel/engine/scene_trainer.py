@@ -47,10 +47,12 @@ class SceneTrainer:
         self.view = view_mode is not None
         self.viewer: LiveSDFViewer | None = None
         if self.view and view_mode is not None:
+            original_sdf = getattr(dataloader.dataset, "scene", None)
             self.viewer = LiveSDFViewer(
                 title="Scene SDF Live Training",
                 resolution=render_resolution,
                 view_mode=view_mode,
+                original_sdf=original_sdf,
             )
 
     def train_step(

@@ -190,7 +190,11 @@ def _is_interactive_gui() -> bool:
 
 
 class LiveSDFViewer:
-    """Interactive Matplotlib viewer updating 2D slice or 3D mesh SDF renderings dynamically during training."""
+    """Interactive Matplotlib viewer updating 2D slice or 3D mesh SDF renderings dynamically during training.
+
+    Displays the original scene side-by-side with the model reconstruction, with synchronized
+    3D viewpoint panning and zooming across both views.
+    """
 
     def __init__(
         self,
@@ -200,6 +204,7 @@ class LiveSDFViewer:
         slice_axis: str = "z",
         slice_pos: float = 0.0,
         view_mode: str = "3d",
+        original_sdf: sdf.d3.SDF3 | None = None,
     ) -> None:
         self.resolution = resolution
         self.step = step
@@ -208,21 +213,103 @@ class LiveSDFViewer:
         self.slice_pos = slice_pos
         self.view_mode = view_mode if view_mode in ("2d", "3d") else "3d"
 
-        self.fig = plt.figure(figsize=(7, 6))
+        if original_sdf is None:
+            from sdfmodel.datasets.scene_sdf import create_4_primitives_scene
+
+            original_sdf = create_4_primitives_scene()
+        self.original_sdf = original_sdf
+
+        self.fig = plt.figure(figsize=(12, 6))
+        self.im_orig: Any = None
         self.im: Any = None
         self.mesh_collection: Any = None
-        self.ax: Any = None
+        self.orig_mesh_collection: Any = None
+        self.ax_orig: Any = None
+        self.ax_recon: Any = None
 
         if self.view_mode == "3d":
-            self.ax = self.fig.add_subplot(111, projection="3d")
-            self.ax.set_xlim(-1.0, 1.0)
-            self.ax.set_ylim(-1.0, 1.0)
-            self.ax.set_zlim(-1.0, 1.0)
-            self.ax.set_xlabel("X")
-            self.ax.set_ylabel("Y")
-            self.ax.set_zlabel("Z")
+            from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+            self.ax_orig = self.fig.add_subplot(121, projection="3d")
+            self.ax_recon = self.fig.add_subplot(
+                122, projection="3d", shareview=self.ax_orig
+            )
+
+            # Bidirectional 3D view and axis limits sharing
+            self.ax_orig.sharex(self.ax_recon)
+            self.ax_orig.sharey(self.ax_recon)
+            self.ax_orig.sharez(self.ax_recon)
+            self.ax_recon.sharex(self.ax_orig)
+            self.ax_recon.sharey(self.ax_orig)
+            self.ax_recon.sharez(self.ax_orig)
+
+            # Render original scene 3D isosurface mesh ONCE
+            orig_pts = sdf.core.generate(
+                self.original_sdf,
+                step=self.step,
+                bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+                sparse=False,
+                verbose=False,
+            )
+            orig_triangles = np.array(orig_pts).reshape(-1, 3, 3)
+            if len(orig_triangles) > 0:
+                self.orig_mesh_collection = Poly3DCollection(
+                    orig_triangles, alpha=0.8, edgecolor="k", linewidths=0.1
+                )
+                self.orig_mesh_collection.set_facecolor([0.2, 0.8, 0.4])
+                self.ax_orig.add_collection3d(self.orig_mesh_collection)
+
+            self.ax_orig.set_xlim(-1.0, 1.0)
+            self.ax_orig.set_ylim(-1.0, 1.0)
+            self.ax_orig.set_zlim(-1.0, 1.0)
+            self.ax_orig.set_xlabel("X")
+            self.ax_orig.set_ylabel("Y")
+            self.ax_orig.set_zlabel("Z")
+            self.ax_orig.set_title("Original Scene")
+
+            self.ax_recon.set_xlim(-1.0, 1.0)
+            self.ax_recon.set_ylim(-1.0, 1.0)
+            self.ax_recon.set_zlim(-1.0, 1.0)
+            self.ax_recon.set_xlabel("X")
+            self.ax_recon.set_ylabel("Y")
+            self.ax_recon.set_zlabel("Z")
+            self.ax_recon.set_title("Reconstruction")
         else:
-            self.ax = self.fig.add_subplot(111)
+            self.ax_orig = self.fig.add_subplot(121)
+            self.ax_recon = self.fig.add_subplot(
+                122, sharex=self.ax_orig, sharey=self.ax_orig
+            )
+
+            x_val = self.slice_pos if self.slice_axis == "x" else None
+            y_val = self.slice_pos if self.slice_axis == "y" else None
+            z_val = self.slice_pos if self.slice_axis == "z" else None
+
+            orig_grid, extent, axes = sdf.core.sample_slice(
+                self.original_sdf,
+                w=self.resolution,
+                h=self.resolution,
+                x=x_val,
+                y=y_val,
+                z=z_val,
+                bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+            )
+            self.im_orig = self.ax_orig.imshow(
+                orig_grid,
+                extent=extent,
+                origin="lower",
+                cmap="twilight_shifted",
+            )
+            self.ax_orig.set_xlabel(f"{axes[0]} axis")
+            self.ax_orig.set_ylabel(f"{axes[1]} axis")
+            self.ax_orig.set_title(
+                f"Original Scene (2D Slice, {self.slice_axis.upper()}={self.slice_pos})"
+            )
+            self.fig.colorbar(self.im_orig, ax=self.ax_orig, label="Signed Distance")
+
+            self.ax_recon.set_title("Reconstruction (2D Slice)")
+
+        # Alias for backward compatibility (points to reconstruction subplot)
+        self.ax = self.ax_recon
 
         plt.ion()
         if _is_interactive_gui():
@@ -299,10 +386,10 @@ class LiveSDFViewer:
                     triangles, alpha=0.8, edgecolor="k", linewidths=0.1
                 )
                 self.mesh_collection.set_facecolor([0.2, 0.6, 1.0])
-                self.ax.add_collection3d(self.mesh_collection)
+                self.ax_recon.add_collection3d(self.mesh_collection)
 
-            self.ax.set_title(
-                f"{self.title} (3D Mesh)\n(Step {step} | {loss_str})"
+            self.ax_recon.set_title(
+                f"Reconstruction (Step {step})\n{loss_str}"
             )
         else:
             x_val = self.slice_pos if self.slice_axis == "x" else None
@@ -320,21 +407,21 @@ class LiveSDFViewer:
             )
 
             if self.im is None:
-                self.im = self.ax.imshow(
+                self.im = self.ax_recon.imshow(
                     grid,
                     extent=extent,
                     origin="lower",
                     cmap="twilight_shifted",
                 )
-                self.ax.set_xlabel(f"{axes[0]} axis")
-                self.ax.set_ylabel(f"{axes[1]} axis")
-                self.fig.colorbar(self.im, ax=self.ax, label="Signed Distance")
+                self.ax_recon.set_xlabel(f"{axes[0]} axis")
+                self.ax_recon.set_ylabel(f"{axes[1]} axis")
+                self.fig.colorbar(self.im, ax=self.ax_recon, label="Signed Distance")
             else:
                 self.im.set_data(grid)
                 self.im.set_clim(vmin=grid.min(), vmax=grid.max())
 
-            self.ax.set_title(
-                f"{self.title} (2D Slice)\n(Step {step} | {loss_str})"
+            self.ax_recon.set_title(
+                f"Reconstruction (Step {step})\n{loss_str}"
             )
 
         self.fig.canvas.draw_idle()
@@ -346,7 +433,7 @@ class LiveSDFViewer:
     def close(self, keep_open: bool = True) -> None:
         if keep_open and plt.fignum_exists(self.fig.number) and _is_interactive_gui():
             plt.ioff()
-            self.ax.set_title(f"{self.title} (Final Reconstruction)")
+            self.ax_recon.set_title("Reconstruction (Final)")
             self.fig.canvas.draw_idle()
             plt.show()
         else:
