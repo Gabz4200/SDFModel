@@ -95,6 +95,7 @@ class CrossAttnSDFModel(BaseModel):
         num_heads: int = 8,
         ffn_ratio: float = 4.0,
         fourier_num_bands: int = 6,
+        fourier_learnable: bool = False,
         dropout: float = 0.0,
         use_tanh: bool = False,
     ) -> None:
@@ -105,7 +106,9 @@ class CrossAttnSDFModel(BaseModel):
         self.use_tanh = use_tanh
 
         self.fourier_pe = FourierPositionEncoding(
-            in_features=in_features, num_bands=fourier_num_bands
+            in_features=in_features,
+            num_bands=fourier_num_bands,
+            learnable=fourier_learnable,
         )
         self.cords_mlp = nn.Sequential(
             nn.Linear(self.fourier_pe.out_features, hidden_dim),
@@ -143,7 +146,27 @@ class CrossAttnSDFModel(BaseModel):
         nn.init.normal_(param, std=0.02)
         return nn.Parameter(param)
 
-    def forward(self, cords: torch.Tensor, embedding: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        cords: torch.Tensor,
+        embedding: torch.Tensor,
+        chunk_size: int | None = None,
+    ) -> torch.Tensor:
+        if chunk_size is not None and chunk_size > 0:
+            if cords.ndim == 3 and cords.shape[1] > chunk_size:
+                chunk_outputs = []
+                for i in range(0, cords.shape[1], chunk_size):
+                    cords_chunk = cords[:, i : i + chunk_size, :]
+                    out_chunk = self.forward(cords_chunk, embedding, chunk_size=None)
+                    chunk_outputs.append(out_chunk)
+                return torch.cat(chunk_outputs, dim=1)
+            elif cords.ndim == 2 and cords.shape[0] > chunk_size:
+                chunk_outputs = []
+                for i in range(0, cords.shape[0], chunk_size):
+                    cords_chunk = cords[i : i + chunk_size, :]
+                    out_chunk = self.forward(cords_chunk, embedding, chunk_size=None)
+                    chunk_outputs.append(out_chunk)
+                return torch.cat(chunk_outputs, dim=0)
         if cords.ndim not in (2, 3):
             raise ValueError(
                 f"Expected cords to have 2 or 3 dimensions (B, 3) or (B, N, 3), got shape {tuple(cords.shape)}"

@@ -170,3 +170,16 @@ def test_when_embedding_hidden_dim_mismatch_then_raises_value_error() -> None:
 
     with pytest.raises(ValueError, match="Expected embedding hidden dimension"):
         model(cords, embedding)
+
+
+def test_cross_attn_sdf_chunked_forward() -> None:
+    hidden_dim = 32
+    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=2, num_heads=2)
+    embedding = CrossAttnSDFModel.create_learnable_embedding(1, 4, hidden_dim)
+    cords = torch.randn(1, 100, 3)
+
+    out_unchunked = model(cords, embedding)
+    out_chunked = model(cords, embedding, chunk_size=32)
+
+    assert out_chunked.shape == out_unchunked.shape
+    assert torch.allclose(out_unchunked, out_chunked, atol=1e-5)

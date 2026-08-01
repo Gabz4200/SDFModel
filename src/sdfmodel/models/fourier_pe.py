@@ -9,13 +9,19 @@ class FourierPositionEncoding(nn.Module):
 
     frequencies: torch.Tensor
 
-    def __init__(self, in_features: int = 3, num_bands: int = 6) -> None:
+    def __init__(
+        self, in_features: int = 3, num_bands: int = 6, learnable: bool = False
+    ) -> None:
         super().__init__()
         self.in_features = in_features
         self.num_bands = num_bands
+        self.learnable = learnable
 
         freqs = torch.pow(2.0, torch.arange(num_bands, dtype=torch.float32)) * math.pi
-        self.register_buffer("frequencies", freqs, persistent=True)
+        if learnable:
+            self.frequencies = nn.Parameter(freqs, requires_grad=True)
+        else:
+            self.register_buffer("frequencies", freqs, persistent=True)
 
     @property
     def out_features(self) -> int:
