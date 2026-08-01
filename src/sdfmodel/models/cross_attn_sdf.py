@@ -6,7 +6,7 @@ from sdfmodel.models.fourier_pe import FourierPositionEncoding
 
 
 class CrossAttentionTransformerBlock(nn.Module):
-    """Transformer block with self-attention for scene object tokens and cross-attention from coordinates."""
+    """Transformer block with cross-attention from coordinates to scene object tokens."""
 
     def __init__(
         self,
@@ -16,24 +16,6 @@ class CrossAttentionTransformerBlock(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
-        # Self-attention for scene object embedding sequence
-        self.obj_norm1 = nn.LayerNorm(hidden_dim)
-        self.obj_self_attn = nn.MultiheadAttention(
-            embed_dim=hidden_dim,
-            num_heads=num_heads,
-            dropout=dropout,
-            batch_first=True,
-        )
-        self.obj_norm2 = nn.LayerNorm(hidden_dim)
-        ffn_hidden_dim = int(hidden_dim * ffn_ratio)
-        self.obj_ffn = nn.Sequential(
-            nn.Linear(hidden_dim, ffn_hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(ffn_hidden_dim, hidden_dim),
-            nn.Dropout(dropout),
-        )
-
         # Cross-attention: coordinates (queries) -> object embeddings (keys, values)
         self.cords_norm1 = nn.LayerNorm(hidden_dim)
         self.cords_cross_attn_kv_norm = nn.LayerNorm(hidden_dim)
@@ -45,6 +27,7 @@ class CrossAttentionTransformerBlock(nn.Module):
         )
 
         # FFN for coordinate representations
+        ffn_hidden_dim = int(hidden_dim * ffn_ratio)
         self.cords_norm2 = nn.LayerNorm(hidden_dim)
         self.cords_ffn = nn.Sequential(
             nn.Linear(hidden_dim, ffn_hidden_dim),
@@ -59,15 +42,7 @@ class CrossAttentionTransformerBlock(nn.Module):
         cords_embed: torch.Tensor,
         obj_embed: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        # 1. Object-object interaction via self-attention
-        norm_obj = self.obj_norm1(obj_embed)
-        obj_attn_out, _ = self.obj_self_attn(
-            query=norm_obj, key=norm_obj, value=norm_obj, need_weights=False
-        )
-        obj_embed = obj_embed + obj_attn_out
-        obj_embed = obj_embed + self.obj_ffn(self.obj_norm2(obj_embed))
-
-        # 2. Coordinate queries cross-attending to object sequence
+        # Coordinate queries cross-attending to object sequence
         norm_cords = self.cords_norm1(cords_embed)
         norm_kv_obj = self.cords_cross_attn_kv_norm(obj_embed)
         cords_attn_out, _ = self.cords_cross_attn(
@@ -78,7 +53,7 @@ class CrossAttentionTransformerBlock(nn.Module):
         )
         cords_embed = cords_embed + cords_attn_out
 
-        # 3. Coordinate representation update via GELU FFN
+        # Coordinate representation update via GELU FFN
         cords_embed = cords_embed + self.cords_ffn(self.cords_norm2(cords_embed))
 
         return cords_embed, obj_embed
@@ -167,18 +142,14 @@ class CrossAttnSDFModel(BaseModel):
                     out_chunk = self.forward(cords_chunk, embedding, chunk_size=None)
                     chunk_outputs.append(out_chunk)
                 return torch.cat(chunk_outputs, dim=0)
+
         if cords.ndim not in (2, 3):
             raise ValueError(
                 f"Expected cords to have 2 or 3 dimensions (B, 3) or (B, N, 3), got shape {tuple(cords.shape)}"
             )
-        if embedding.ndim != 3:
+        if embedding.ndim not in (2, 3):
             raise ValueError(
-                f"Expected embedding to have 3 dimensions (B, S, D), got shape {tuple(embedding.shape)}"
-            )
-
-        if cords.shape[0] != embedding.shape[0]:
-            raise ValueError(
-                f"Batch size mismatch: cords has batch size {cords.shape[0]} but embedding has batch size {embedding.shape[0]}"
+                f"Expected embedding to have 2 or 3 dimensions (S, D) or (B, S, D), got shape {tuple(embedding.shape)}"
             )
 
         if cords.shape[-1] != self.in_features:
@@ -191,9 +162,30 @@ class CrossAttnSDFModel(BaseModel):
                 f"Expected embedding hidden dimension {self.hidden_dim}, got {embedding.shape[-1]} in shape {tuple(embedding.shape)}"
             )
 
-        is_2d = cords.ndim == 2
-        if is_2d:
-            cords = cords.unsqueeze(1)
+        is_2d_cords = cords.ndim == 2
+        is_2d_emb = embedding.ndim == 2
+
+        if is_2d_emb:
+            embedding = embedding.unsqueeze(0)
+
+        squeeze_dim = None
+        if is_2d_cords:
+            if embedding.shape[0] > 1 and cords.shape[0] == embedding.shape[0]:
+                cords = cords.unsqueeze(1)
+                squeeze_dim = 1
+            else:
+                cords = cords.unsqueeze(0)
+                squeeze_dim = 0 if is_2d_emb else None
+
+        if cords.shape[0] != embedding.shape[0]:
+            if cords.shape[0] == 1:
+                cords = cords.expand(embedding.shape[0], -1, -1)
+            elif embedding.shape[0] == 1:
+                embedding = embedding.expand(cords.shape[0], -1, -1)
+            else:
+                raise ValueError(
+                    f"Batch size mismatch: cords has batch size {cords.shape[0]} but embedding has batch size {embedding.shape[0]}"
+                )
 
         fourier_feats = self.fourier_pe(cords)
         cords_embed = self.cords_mlp(fourier_feats)
@@ -207,7 +199,7 @@ class CrossAttnSDFModel(BaseModel):
         if self.use_tanh:
             dist = torch.tanh(dist)
 
-        if is_2d:
-            dist = dist.squeeze(1)
+        if squeeze_dim is not None:
+            dist = dist.squeeze(squeeze_dim)
 
         return dist

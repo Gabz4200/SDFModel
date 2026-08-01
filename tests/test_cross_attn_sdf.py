@@ -183,3 +183,63 @@ def test_cross_attn_sdf_chunked_forward() -> None:
 
     assert out_chunked.shape == out_unchunked.shape
     assert torch.allclose(out_unchunked, out_chunked, atol=1e-5)
+
+
+def test_cross_attn_block_has_no_self_attention_layers() -> None:
+    """Transformer block must not contain self-attention layers on object embeddings."""
+    from sdfmodel.models.cross_attn_sdf import CrossAttentionTransformerBlock
+
+    block = CrossAttentionTransformerBlock(hidden_dim=32, num_heads=2)
+    assert not hasattr(block, "obj_self_attn")
+    assert not hasattr(block, "obj_ffn")
+    assert not hasattr(block, "obj_norm1")
+    assert not hasattr(block, "obj_norm2")
+
+
+def test_when_passing_multiple_cords_and_multiple_embeddings_2d_then_returns_per_cord_distances() -> None:
+    """Passing 2D cords (N, 3) and 2D embeddings (S, D) outputs distance (N, 1)."""
+    hidden_dim = 32
+    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=2, num_heads=2)
+    cords = torch.randn(50, 3)
+    embedding = torch.randn(4, hidden_dim)
+
+    output = model(cords, embedding)
+
+    assert output.shape == (50, 1)
+
+
+def test_when_passing_multiple_cords_and_multiple_embeddings_3d_then_returns_per_cord_distances() -> None:
+    """Passing 3D cords (B, N, 3) and 3D embeddings (B, S, D) outputs distance (B, N, 1)."""
+    hidden_dim = 32
+    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=2, num_heads=2)
+    cords = torch.randn(3, 50, 3)
+    embedding = torch.randn(3, 4, hidden_dim)
+
+    output = model(cords, embedding)
+
+    assert output.shape == (3, 50, 1)
+
+
+def test_when_passing_2d_cords_and_3d_embeddings_then_broadcasts_and_returns_batched_distances() -> None:
+    """Passing 2D cords (N, 3) and 3D embeddings (B, S, D) broadcasts cords across batch."""
+    hidden_dim = 32
+    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=2, num_heads=2)
+    cords = torch.randn(50, 3)
+    embedding = torch.randn(3, 4, hidden_dim)
+
+    output = model(cords, embedding)
+
+    assert output.shape == (3, 50, 1)
+
+
+def test_when_passing_3d_cords_and_2d_embeddings_then_broadcasts_and_returns_batched_distances() -> None:
+    """Passing 3D cords (B, N, 3) and 2D embeddings (S, D) broadcasts embeddings across batch."""
+    hidden_dim = 32
+    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=2, num_heads=2)
+    cords = torch.randn(3, 50, 3)
+    embedding = torch.randn(4, hidden_dim)
+
+    output = model(cords, embedding)
+
+    assert output.shape == (3, 50, 1)
+
