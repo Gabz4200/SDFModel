@@ -9,6 +9,7 @@ from sdfmodel.models import SDFMLP, CrossAttnSDFModel
 from sdfmodel.render import (
     LiveSDFViewer,
     create_sdf3_wrapper,
+    export_interpolation_frames,
     export_sdf_mesh,
     render_interactive_interpolation,
     render_sdf_slice,
@@ -36,6 +37,17 @@ def test_create_sdf3_wrapper_sdf_mlp() -> None:
     assert len(values) == 2
 
 
+def test_create_sdf3_wrapper_large_point_chunking() -> None:
+    model = SDFMLP(in_features=3, hidden_features=32, num_layers=2)
+    sdf_obj = create_sdf3_wrapper(model, batch_size=1000)
+
+    # Simulate 10,000 points chunked into batches of 1,000
+    pts = np.random.randn(10000, 3).astype(np.float32)
+    values = sdf_obj(pts)
+    assert len(values) == 10000
+    assert values.shape in ((10000, 1), (10000,))
+
+
 def test_render_sdf_slice_sampling() -> None:
     model = SDFMLP(in_features=3, hidden_features=32, num_layers=2)
     sdf_obj = create_sdf3_wrapper(model)
@@ -61,11 +73,11 @@ def test_live_sdf_viewer_modes() -> None:
 
     viewer_2d = LiveSDFViewer(view_mode="2d", resolution=32)
     viewer_2d.update(sdf_obj, step=1, loss=0.5)
-    viewer_2d.close()
+    viewer_2d.close(keep_open=True)
 
     viewer_3d = LiveSDFViewer(view_mode="3d", step=0.5)
     viewer_3d.update(sdf_obj, step=1, loss=0.5)
-    viewer_3d.close()
+    viewer_3d.close(keep_open=False)
 
 
 def test_render_interactive_interpolation() -> None:
@@ -88,3 +100,26 @@ def test_render_interactive_interpolation() -> None:
         resolution=32,
         view_mode="3d",
     )
+
+
+def test_export_interpolation_frames(tmp_path) -> None:
+    hidden_dim = 32
+    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=2, num_heads=2)
+    embeddings = CrossAttnSDFModel.create_learnable_embedding(1, 4, hidden_dim)
+
+    gif_path = tmp_path / "morph.gif"
+    frames = export_interpolation_frames(
+        model=model,
+        embeddings=embeddings,
+        num_frames=3,
+        resolution=32,
+        step=0.5,
+        view_mode="2d",
+        output_path=gif_path,
+    )
+
+    assert isinstance(frames, np.ndarray)
+    assert frames.shape[0] == 3
+    assert frames.ndim == 4
+    assert frames.shape[-1] == 4  # RGBA
+    assert gif_path.exists()

@@ -1,9 +1,14 @@
+import contextlib
+import math
+from pathlib import Path
 from typing import Any, cast
 
+import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import sdf
 import torch
+from PIL import Image
 from torch import nn
 
 from sdfmodel.models.cross_attn_sdf import CrossAttnSDFModel
@@ -55,7 +60,10 @@ def create_sdf3_wrapper(
 
                 results.append(out.cpu().numpy())
 
-        return np.concatenate(results, axis=0)
+        res = np.concatenate(results, axis=0)
+        if res.ndim > 1:
+            res = res.squeeze(-1)
+        return res
 
     return sdf.d3.SDF3(eval_sdf)
 
@@ -174,6 +182,11 @@ def render_sdf_3d(
     return triangles
 
 
+def _is_interactive_gui() -> bool:
+    backend = plt.get_backend().lower()
+    return backend not in ("agg", "svg", "pdf", "ps", "template") and matplotlib.is_interactive()
+
+
 class LiveSDFViewer:
     """Interactive Matplotlib viewer updating 2D slice or 3D mesh SDF renderings dynamically during training."""
 
@@ -210,7 +223,8 @@ class LiveSDFViewer:
             self.ax = self.fig.add_subplot(111)
 
         plt.ion()
-        self.fig.show()
+        if _is_interactive_gui():
+            self.fig.show()
 
     def update(self, sdf_obj: sdf.d3.SDF3, step: int, loss: float) -> None:
         if self.view_mode == "3d":
@@ -289,11 +303,13 @@ class LiveSDFViewer:
             )
 
         self.fig.canvas.draw_idle()
-        self.fig.canvas.flush_events()
-        plt.pause(0.01)
+        with contextlib.suppress(AttributeError, RuntimeError):
+            self.fig.canvas.flush_events()
+        if _is_interactive_gui():
+            plt.pause(0.01)
 
     def close(self, keep_open: bool = True) -> None:
-        if keep_open and plt.fignum_exists(self.fig.number):
+        if keep_open and plt.fignum_exists(self.fig.number) and _is_interactive_gui():
             plt.ioff()
             self.ax.set_title(f"{self.title} (Final Reconstruction)")
             self.fig.canvas.draw_idle()
@@ -443,4 +459,100 @@ def render_interactive_interpolation(
         s.on_changed(update_render)
 
     update_render()
-    plt.show()
+    if _is_interactive_gui():
+        plt.show()
+
+
+def export_interpolation_frames(
+    model: nn.Module,
+    embeddings: torch.Tensor,
+    num_frames: int = 30,
+    resolution: int = 128,
+    step: float = 0.12,
+    view_mode: str = "2d",
+    device: str = "cpu",
+    output_path: str | Path | None = None,
+    duration: int = 100,
+) -> np.ndarray:
+    """Generate a batch sequence of interpolated rendering frames morphing smoothly between object embeddings.
+
+    Returns an ndarray stack of image frames (num_frames, H, W, 4) in RGBA format,
+    and optionally exports them to GIF if output_path is provided.
+    """
+    model = model.to(device).eval()
+    base_emb = embeddings.detach().to(device)
+    if base_emb.ndim == 2:
+        base_emb = base_emb.unsqueeze(0)
+
+    num_objs = base_emb.shape[1]
+    frames_list: list[np.ndarray] = []
+    pil_images: list[Image.Image] = []
+
+    for f_idx in range(num_frames):
+        t = f_idx / max(num_frames - 1, 1)
+        curr_emb = base_emb.clone()
+        for i in range(num_objs):
+            target_idx = (i + 1) % num_objs
+            alpha = 0.5 * (1.0 - math.cos(t * math.pi * 2.0))
+            curr_emb[0, i] = (1.0 - alpha) * base_emb[0, i] + alpha * base_emb[0, target_idx]
+
+        sdf_obj = create_sdf3_wrapper(model, embedding=curr_emb, device=device)
+
+        fig = plt.figure(figsize=(6, 6))
+        if view_mode == "3d":
+            ax: Any = fig.add_subplot(111, projection="3d")
+            ax.set_xlim(-1.0, 1.0)
+            ax.set_ylim(-1.0, 1.0)
+            ax.set_zlim(-1.0, 1.0)
+
+            points = sdf.core.generate(
+                sdf_obj,
+                step=step,
+                bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+                sparse=False,
+                verbose=False,
+            )
+            triangles = np.array(points).reshape(-1, 3, 3)
+            if len(triangles) > 0:
+                from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+                mesh = Poly3DCollection(
+                    triangles, alpha=0.85, edgecolor="k", linewidths=0.1
+                )
+                mesh.set_facecolor([0.2, 0.6, 1.0])
+                ax.add_collection3d(mesh)
+            ax.set_title(f"Morphing Frame {f_idx + 1}/{num_frames}")
+        else:
+            ax = fig.add_subplot(111)
+            grid, extent, _ = sdf.core.sample_slice(
+                sdf_obj,
+                w=resolution,
+                h=resolution,
+                z=0.0,
+                bounds=((-1.0, -1.0, -1.0), (1.0, 1.0, 1.0)),
+            )
+            ax.imshow(grid, extent=extent, origin="lower", cmap="twilight_shifted")
+            ax.set_title(f"Morphing Frame {f_idx + 1}/{num_frames}")
+
+        fig.canvas.draw()
+        rgba_buffer = np.asarray(cast(Any, fig.canvas).buffer_rgba())
+        frames_list.append(rgba_buffer.copy())
+
+        if output_path is not None:
+            img = Image.fromarray(rgba_buffer)
+            pil_images.append(img.convert("P", palette=Image.Palette.ADAPTIVE))
+
+        plt.close(fig)
+
+    if output_path is not None and pil_images:
+        path = Path(output_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        pil_images[0].save(
+            path,
+            save_all=True,
+            append_images=pil_images[1:],
+            duration=duration,
+            loop=0,
+        )
+
+    return np.stack(frames_list, axis=0)
