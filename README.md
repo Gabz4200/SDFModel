@@ -46,14 +46,18 @@ The network generates smooth, closed 3D isosurface meshes matching the ground tr
 - **CrossAttnSDFModel Architecture**: Combines Fourier positional encodings with transformer blocks featuring:
   - **Self-Attention**: Computes interactions across scene object token sequence embeddings.
   - **Cross-Attention**: Queries object embeddings using spatial 3D coordinate representations.
-- **SDFMLP Baseline**: Flexible Multi-Layer Perceptron neural field model supporting optional Fourier feature encodings and SiLU activations.
-- **CPU-Differentiable Eikonal Loss**: Employs directional finite differences ($g_v = \frac{f(p + \epsilon v) - f(p - \epsilon v)}{2\epsilon}$) to enforce the Eikonal constraint ($\|\nabla f\| = 1$) efficiently on CPU/GPU without second-order autograd graph overhead.
-- **fogleman/sdf Integration**: Converts PyTorch models into `sdf.d3.SDF3` interface objects via `create_sdf3_wrapper` for:
+  - **Query Coordinate Chunking**: Automatic point chunking (`chunk_size`) prevents memory spikes during high-resolution isosurface mesh generation ($256^3$/$512^3$).
+- **SDFMLP Baseline**: Flexible Multi-Layer Perceptron neural field model supporting optional Fourier feature encodings, SiLU activations, and configurable normalization layers (`LayerNorm` and `WeightNorm`).
+- **Fourier Positional Features**: `FourierPositionEncoding` supports both static buffer frequency bands and learnable/adaptive frequency band scaling (`fourier_learnable`).
+- **CPU-Differentiable & Autograd Eikonal Loss**: `compute_eikonal_loss` supports:
+  - **Adaptive $\epsilon(p)$ Finite Differences**: Directional finite differences with adaptive step size scaling ($\epsilon(p) = \text{clamp}(\alpha |f(p)|, \epsilon_{\text{min}}, \epsilon_{\text{max}})$) enforcing $\|\nabla f\| = 1$ without autograd graph overhead.
+  - **Exact Autograd Mode**: Optional exact gradient computation (`use_autograd=True`) via `torch.autograd.grad`.
+- **fogleman/sdf Integration**: Converts PyTorch models into `sdf.d3.SDF3` interface objects via `create_sdf3_wrapper` with automatic point batching for:
   - **2D Slice Rendering**: Fast 2D cross-sections across X, Y, or Z planes (`render_sdf_slice`).
   - **3D Isosurface Mesh Extraction**: Marching Cubes mesh generation (`render_sdf_3d`).
   - **Mesh Export**: Export reconstructed scenes directly to STL or OBJ formats (`export_sdf_mesh`).
-- **Live Training Viewer**: `LiveSDFViewer` provides real-time, non-blocking 2D or 3D Matplotlib visual updates during training loops.
-- **Interactive Embedding Interpolation**: `render_interactive_interpolation` launches a Matplotlib GUI equipped with sliders to continuously interpolate object embeddings and visualize real-time shape blending.
+- **Live Training Viewer**: `LiveSDFViewer` provides non-blocking, thread-safe 2D or 3D Matplotlib visual updates across interactive and headless backends.
+- **Interactive Embedding Interpolation & GIF Export**: `render_interactive_interpolation` launches a Matplotlib GUI with sliders for continuous shape blending, while `export_interpolation_frames` renders and exports smooth embedding morphing animations as stack arrays or animated GIFs.
 - **Unified CLI & Scripts**: Modular command-line interface (`sdfmodel`) and specialized standalone scripts for scene training, rendering, and evaluation.
 
 ---
@@ -89,7 +93,7 @@ SDFModel/
 │   └── utils/
 │       ├── config.py         # Dataclass configuration schemas & YAML parser
 │       └── seed.py           # Random seed reproducibility utilities
-├── tests/                    # Behavioral pytest test suite (26 tests)
+├── tests/                    # Behavioral pytest test suite (34 tests)
 ├── pyproject.toml            # Package configuration and dependency declarations
 └── README.md                 # Project documentation
 ```
