@@ -1,11 +1,12 @@
 import argparse
 import sys
 
+
 import torch
 
 from sdfmodel.datasets import build_dataloaders, build_scene_dataloader
 from sdfmodel.engine import SceneTrainer, Trainer
-from sdfmodel.models import CrossAttnSDFModel, build_model, list_models
+from sdfmodel.models import CrossAttnSDFModel, VectorSDFModel, build_model, list_models
 from sdfmodel.render import (
     create_sdf3_wrapper,
     export_sdf_mesh,
@@ -71,6 +72,11 @@ def run_render(args: argparse.Namespace) -> int:
             hidden_dim=args.hidden_dim,
             num_layers=args.num_layers,
         )
+    elif args.model == "vector_sdf":
+        model = VectorSDFModel(
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+        )
     else:
         model = build_model(
             args.model,
@@ -86,7 +92,7 @@ def run_render(args: argparse.Namespace) -> int:
     model = model.to(device).eval()
 
     embedding = None
-    if isinstance(model, CrossAttnSDFModel):
+    if isinstance(model, (CrossAttnSDFModel, VectorSDFModel)):
         embedding = CrossAttnSDFModel.create_learnable_embedding(
             batch_size=1,
             seq_len=4,
@@ -103,7 +109,7 @@ def run_render(args: argparse.Namespace) -> int:
 
     view_mode = args.view
     if view_mode is None:
-        view_mode = "2d" if args.mode == "slice" else "3d"
+        view_mode = "3d"
 
     if view_mode == "2d":
         print(
@@ -149,12 +155,23 @@ def run_train_scene(args: argparse.Namespace) -> int:
         else args.device
     )
 
-    print(
-        f"Initializing CrossAttnSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}) and 4 learnable embeddings..."
-    )
-    model = CrossAttnSDFModel(
-        hidden_dim=args.hidden_dim, num_layers=args.num_layers
-    ).to(device)
+    model_type = getattr(args, "model_type", "scalar_sdf")
+    assert model_type in ("scalar_sdf", "vector_sdf")
+
+    if model_type == "vector_sdf":
+        print(
+            f"Initializing VectorSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}) and 4 learnable embeddings..."
+        )
+        model = VectorSDFModel(
+            hidden_dim=args.hidden_dim, num_layers=args.num_layers
+        ).to(device)
+    else:
+        print(
+            f"Initializing CrossAttnSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}) and 4 learnable embeddings..."
+        )
+        model = CrossAttnSDFModel(
+            hidden_dim=args.hidden_dim, num_layers=args.num_layers
+        ).to(device)
 
     embeddings = CrossAttnSDFModel.create_learnable_embedding(
         batch_size=1,
@@ -172,6 +189,7 @@ def run_train_scene(args: argparse.Namespace) -> int:
         num_samples=args.num_samples,
         points_per_item=args.points_per_item,
         batch_size=args.batch_size,
+        return_normals=True,
     )
 
     trainer = SceneTrainer(
@@ -183,6 +201,7 @@ def run_train_scene(args: argparse.Namespace) -> int:
         view=args.view,
         render_every_steps=args.render_every_steps,
         render_resolution=args.render_resolution,
+        model_type=model_type,
     )
 
     print("Starting 4-primitive scene training loop...")
@@ -192,14 +211,19 @@ def run_train_scene(args: argparse.Namespace) -> int:
             epoch_loss = 0.0
             num_batches = 0
 
-            for points, targets in dataloader:
-                loss_val = trainer.train_step(global_step, points, targets)
+            for batch in dataloader:
+                points = batch[0]
+                targets = batch[1]
+                target_normals = batch[2] if len(batch) > 2 else None
+                loss_val = trainer.train_step(
+                    global_step, points, targets, target_normals=target_normals
+                )
                 epoch_loss += loss_val
                 num_batches += 1
                 global_step += 1
 
             avg_loss = epoch_loss / max(1, num_batches)
-            print(f"Epoch [{epoch}/{args.epochs}] | Avg MSE Loss: {avg_loss:.6f}")
+            print(f"Epoch [{epoch}/{args.epochs}] | Avg Loss: {avg_loss:.6f}")
 
     finally:
         trainer.close(keep_open=args.view is not None)
@@ -214,6 +238,7 @@ def run_train_scene(args: argparse.Namespace) -> int:
                 "embedding_state": embeddings.data,
                 "hidden_dim": args.hidden_dim,
                 "num_layers": args.num_layers,
+                "model_type": model_type,
             },
             args.save_checkpoint,
         )
@@ -243,11 +268,18 @@ def run_eval_sdfmodel(args: argparse.Namespace) -> int:
 
     hidden_dim = checkpoint.get("hidden_dim", 64)
     num_layers = checkpoint.get("num_layers", 4)
+    model_type = checkpoint.get("model_type", "scalar_sdf")
 
-    print(
-        f"Initializing CrossAttnSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}) on device '{device}'..."
-    )
-    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=num_layers).to(device)
+    if model_type == "vector_sdf":
+        print(
+            f"Initializing VectorSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}) on device '{device}'..."
+        )
+        model = VectorSDFModel(hidden_dim=hidden_dim, num_layers=num_layers).to(device)
+    else:
+        print(
+            f"Initializing CrossAttnSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}) on device '{device}'..."
+        )
+        model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=num_layers).to(device)
 
     model_state = checkpoint.get("model_state", checkpoint)
     model.load_state_dict(model_state)
@@ -382,7 +414,7 @@ def main() -> int:
 
     # Train scene command
     scene_parser = subparsers.add_parser(
-        "train-scene", help="Train CrossAttnSDFModel & 4 embeddings on 3D scene"
+        "train-scene", help="Train SDF model & 4 embeddings on 3D scene"
     )
     scene_parser.add_argument(
         "--epochs", type=int, default=10, help="Number of training epochs"
@@ -402,6 +434,13 @@ def main() -> int:
     )
     scene_parser.add_argument(
         "--points-per-item", type=int, default=256, help="Points per item sample"
+    )
+    scene_parser.add_argument(
+        "--model-type",
+        type=str,
+        default="scalar_sdf",
+        choices=["scalar_sdf", "vector_sdf"],
+        help="Model type: 'scalar_sdf' (CrossAttnSDFModel) or 'vector_sdf' (VectorSDFModel)",
     )
     scene_parser.add_argument(
         "--view",
@@ -431,6 +470,12 @@ def main() -> int:
         type=str,
         default=None,
         help="Path to save output PyTorch checkpoint (.pt)",
+    )
+    scene_parser.add_argument(
+        "--save-mesh",
+        type=str,
+        default=None,
+        help="Path to export final reconstructed 3D mesh (.stl)",
     )
     # Eval SDF Model command
     eval_parser = subparsers.add_parser(

@@ -12,6 +12,7 @@ from PIL import Image
 from torch import nn
 
 from sdfmodel.models.cross_attn_sdf import CrossAttnSDFModel
+from sdfmodel.models.vector_sdf import VectorSDFModel
 
 
 def create_sdf3_wrapper(
@@ -47,7 +48,14 @@ def create_sdf3_wrapper(
                     device=device, dtype=torch.float32
                 )
 
-                if isinstance(model, CrossAttnSDFModel):
+                if isinstance(model, VectorSDFModel):
+                    assert embedding is not None
+                    out = model.predict_scalar(cords_t, embedding)
+                    if out.ndim > 1:
+                        out = out.squeeze(-1)
+                    if out.ndim > 1:
+                        out = out.squeeze(0)
+                elif isinstance(model, CrossAttnSDFModel):
                     # CrossAttnSDFModel accepts multiple coordinates in 2D (N, 3) and (S, D) or (B, S, D)
                     out = model(cords_t, embedding)
                     if out.ndim > 1:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 SDF Scene Reconstruction Training Script
-Trains CrossAttnSDFModel and 4 learnable primitive object embeddings to reconstruct a 4-primitive 3D scene.
+Trains SDF models (CrossAttnSDFModel or VectorSDFModel) and 4 learnable primitive object embeddings to reconstruct a 4-primitive 3D scene.
 Includes --view flag for non-blocking live rendering updates during training.
 """
 
@@ -12,13 +12,13 @@ import torch
 
 from sdfmodel.datasets import build_scene_dataloader
 from sdfmodel.engine import SceneTrainer
-from sdfmodel.models import CrossAttnSDFModel
+from sdfmodel.models import CrossAttnSDFModel, VectorSDFModel
 from sdfmodel.render import create_sdf3_wrapper, export_sdf_mesh
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Train CrossAttnSDFModel & 4 Learnable Embeddings on 3D Scene"
+        description="Train SDF Model & 4 Learnable Embeddings on 3D Scene"
     )
     parser.add_argument(
         "--epochs", type=int, default=10, help="Number of training epochs"
@@ -40,6 +40,13 @@ def main() -> int:
         "--points-per-item", type=int, default=256, help="Points per item sample"
     )
     parser.add_argument(
+        "--model-type",
+        type=str,
+        default="scalar_sdf",
+        choices=["scalar_sdf", "vector_sdf"],
+        help="Model type: 'scalar_sdf' (CrossAttnSDFModel) or 'vector_sdf' (VectorSDFModel)",
+    )
+    parser.add_argument(
         "--view",
         nargs="?",
         const="3d",
@@ -51,7 +58,7 @@ def main() -> int:
         "--render-every-steps",
         type=int,
         default=5,
-        help="Render update frequency in steps",
+        help="Render update frequency in steps (default 5)",
     )
     parser.add_argument(
         "--render-resolution",
@@ -83,12 +90,20 @@ def main() -> int:
         else args.device
     )
 
-    print(
-        f"Initializing CrossAttnSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}) and 4 learnable embeddings..."
-    )
-    model = CrossAttnSDFModel(
-        hidden_dim=args.hidden_dim, num_layers=args.num_layers
-    ).to(device)
+    if args.model_type == "vector_sdf":
+        print(
+            f"Initializing VectorSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}) and 4 learnable embeddings..."
+        )
+        model = VectorSDFModel(
+            hidden_dim=args.hidden_dim, num_layers=args.num_layers
+        ).to(device)
+    else:
+        print(
+            f"Initializing CrossAttnSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}) and 4 learnable embeddings..."
+        )
+        model = CrossAttnSDFModel(
+            hidden_dim=args.hidden_dim, num_layers=args.num_layers
+        ).to(device)
 
     embeddings = CrossAttnSDFModel.create_learnable_embedding(
         batch_size=1,
@@ -100,7 +115,7 @@ def main() -> int:
     optimizer = torch.optim.Adam(list(model.parameters()) + [embeddings], lr=args.lr)
 
     print(
-        f"Building scene dataset ({args.num_samples} samples, batch_size={args.batch_size})..."
+        f"Building 4-primitive scene dataset ({args.num_samples} samples, batch_size={args.batch_size})..."
     )
     dataloader = build_scene_dataloader(
         num_samples=args.num_samples,
@@ -118,6 +133,7 @@ def main() -> int:
         view=args.view,
         render_every_steps=args.render_every_steps,
         render_resolution=args.render_resolution,
+        model_type=args.model_type,
     )
 
     print("Starting scene reconstruction training loop...")
@@ -128,7 +144,8 @@ def main() -> int:
             num_batches = 0
 
             for batch in dataloader:
-                points, targets = batch[0], batch[1]
+                points = batch[0]
+                targets = batch[1]
                 target_normals = batch[2] if len(batch) > 2 else None
                 loss_val = trainer.train_step(
                     global_step, points, targets, target_normals=target_normals
@@ -138,7 +155,7 @@ def main() -> int:
                 global_step += 1
 
             avg_loss = epoch_loss / max(1, num_batches)
-            print(f"Epoch [{epoch}/{args.epochs}] | Avg MSE Loss: {avg_loss:.6f}")
+            print(f"Epoch [{epoch}/{args.epochs}] | Avg Loss: {avg_loss:.6f}")
 
     finally:
         trainer.close(keep_open=args.view is not None)
@@ -153,6 +170,7 @@ def main() -> int:
                 "embedding_state": embeddings.data,
                 "hidden_dim": args.hidden_dim,
                 "num_layers": args.num_layers,
+                "model_type": args.model_type,
             },
             args.save_checkpoint,
         )
