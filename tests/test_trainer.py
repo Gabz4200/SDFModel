@@ -47,7 +47,43 @@ def test_trainer_fit_and_checkpointing() -> None:
 def test_eikonal_loss_computation() -> None:
     model = SDFMLP(in_features=3, hidden_features=32, num_layers=3)
     points = torch.randn(10, 3)
-    eikonal_loss = compute_eikonal_loss(model, points)
 
-    assert eikonal_loss.ndim == 0
-    assert eikonal_loss.item() >= 0.0
+    # Test default directional finite difference with adaptive epsilon
+    loss_fd = compute_eikonal_loss(model, points, use_autograd=False)
+    assert loss_fd.ndim == 0
+    assert loss_fd.item() >= 0.0
+
+    # Test gradient backward flow for finite difference
+    loss_fd.backward()
+    param = next(model.parameters())
+    assert param.grad is not None
+
+    # Test autograd mode
+    model.zero_grad()
+    loss_ag = compute_eikonal_loss(model, points, use_autograd=True)
+    assert loss_ag.ndim == 0
+    assert loss_ag.item() >= 0.0
+
+    loss_ag.backward()
+    assert param.grad is not None
+
+
+def test_eikonal_loss_with_embedding() -> None:
+    from sdfmodel.models.cross_attn_sdf import CrossAttnSDFModel
+
+    hidden_dim = 32
+    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=2, num_heads=2)
+    embedding = CrossAttnSDFModel.create_learnable_embedding(1, 4, hidden_dim)
+    points = torch.randn(2, 10, 3)
+
+    loss_fd = compute_eikonal_loss(
+        model, points, embedding=embedding, use_autograd=False
+    )
+    assert loss_fd.ndim == 0
+    assert loss_fd.item() >= 0.0
+
+    loss_ag = compute_eikonal_loss(
+        model, points, embedding=embedding, use_autograd=True
+    )
+    assert loss_ag.ndim == 0
+    assert loss_ag.item() >= 0.0

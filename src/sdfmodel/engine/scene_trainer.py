@@ -3,6 +3,7 @@ from torch import nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
+from sdfmodel.engine.metrics import compute_eikonal_loss
 from sdfmodel.models.cross_attn_sdf import CrossAttnSDFModel
 from sdfmodel.render import LiveSDFViewer, create_sdf3_wrapper
 
@@ -54,17 +55,11 @@ class SceneTrainer:
 
         batch_embeddings = self.learnable_embeddings.expand(batch_size, -1, -1)
 
-        # Directional finite difference for Eikonal loss + L1 + MSE surface penalization
-        eps = 1e-3
-        v = torch.randn_like(points)
-        v = v / (v.norm(dim=-1, keepdim=True) + 1e-8)
+        pred_sdf = self.model(points, batch_embeddings)
+        eikonal_loss = compute_eikonal_loss(
+            self.model, points, embedding=batch_embeddings, use_autograd=False
+        )
 
-        pred_p1 = self.model(points + eps * v, batch_embeddings)
-        pred_p2 = self.model(points - eps * v, batch_embeddings)
-        gv = (pred_p1 - pred_p2) / (2 * eps)
-
-        eikonal_loss = torch.mean((torch.abs(gv) - 1.0) ** 2)
-        pred_sdf = (pred_p1 + pred_p2) / 2.0
         mse_loss = self.criterion(pred_sdf, target_sdf)
         l1_loss = torch.nn.functional.l1_loss(pred_sdf, target_sdf)
 
