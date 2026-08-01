@@ -48,10 +48,12 @@ def create_sdf3_wrapper(
                 )
 
                 if isinstance(model, CrossAttnSDFModel):
-                    # CrossAttnSDFModel expects (B, N, 3) and (B, S, D)
-                    cords_batch = cords_t.unsqueeze(0)
-                    out = model(cords_batch, embedding)
-                    out = out.squeeze(0).squeeze(-1)
+                    # CrossAttnSDFModel accepts multiple coordinates in 2D (N, 3) and (S, D) or (B, S, D)
+                    out = model(cords_t, embedding)
+                    if out.ndim > 1:
+                        out = out.squeeze(-1)
+                    if out.ndim > 1:
+                        out = out.squeeze(0)
                 else:
                     # Standard SDF MLP expects (B, 3) or (N, 3)
                     out = model(cords_t)
@@ -226,7 +228,40 @@ class LiveSDFViewer:
         if _is_interactive_gui():
             self.fig.show()
 
-    def update(self, sdf_obj: sdf.d3.SDF3, step: int, loss: float) -> None:
+    def update(
+        self,
+        sdf_obj: sdf.d3.SDF3,
+        step: int,
+        loss: float | dict[str, Any],
+    ) -> None:
+        def _to_float(val: Any) -> float:
+            if isinstance(val, torch.Tensor):
+                return float(val.item())
+            return float(val)
+
+        if isinstance(loss, (float, int)):
+            loss_str = f"Total Loss: {float(loss):.6f}"
+        elif isinstance(loss, dict):
+            total_val = _to_float(loss.get("loss", loss.get("mse_loss", 0.0)))
+            parts = [f"Total Loss: {total_val:.6f}"]
+
+            sub_parts = []
+            if "mse_loss" in loss:
+                v = _to_float(loss["mse_loss"])
+                sub_parts.append(f"MSE: {v:.6f}")
+            if "eikonal_loss" in loss:
+                v = _to_float(loss["eikonal_loss"])
+                sub_parts.append(f"Eikonal: {v:.4f}")
+            if "normal_loss" in loss:
+                v = _to_float(loss["normal_loss"])
+                sub_parts.append(f"Normal: {v:.4f}")
+
+            if sub_parts:
+                parts.append(f"({ ' | '.join(sub_parts) })")
+            loss_str = " ".join(parts)
+        else:
+            loss_str = f"Loss: {loss}"
+
         if self.view_mode == "3d":
             points = sdf.core.generate(
                 sdf_obj,
@@ -267,7 +302,7 @@ class LiveSDFViewer:
                 self.ax.add_collection3d(self.mesh_collection)
 
             self.ax.set_title(
-                f"{self.title} (3D Mesh)\n(Step {step} | MSE Loss {loss:.6f})"
+                f"{self.title} (3D Mesh)\n(Step {step} | {loss_str})"
             )
         else:
             x_val = self.slice_pos if self.slice_axis == "x" else None
@@ -299,7 +334,7 @@ class LiveSDFViewer:
                 self.im.set_clim(vmin=grid.min(), vmax=grid.max())
 
             self.ax.set_title(
-                f"{self.title} (2D Slice)\n(Step {step} | MSE Loss {loss:.6f})"
+                f"{self.title} (2D Slice)\n(Step {step} | {loss_str})"
             )
 
         self.fig.canvas.draw_idle()

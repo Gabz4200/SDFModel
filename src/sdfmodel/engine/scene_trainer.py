@@ -3,7 +3,7 @@ from torch import nn
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
-from sdfmodel.engine.metrics import compute_eikonal_loss
+from sdfmodel.engine.metrics import compute_combined_sdf_loss
 from sdfmodel.models.cross_attn_sdf import CrossAttnSDFModel
 from sdfmodel.render import LiveSDFViewer, create_sdf3_wrapper
 
@@ -21,6 +21,10 @@ class SceneTrainer:
         view: str | bool | None = None,
         render_every_steps: int = 5,
         render_resolution: int = 128,
+        w_distance: float = 1.0,
+        w_l1: float = 0.5,
+        w_eikonal: float = 0.1,
+        w_normal: float = 0.2,
     ) -> None:
         self.model = model.to(device)
         self.learnable_embeddings = learnable_embeddings
@@ -28,6 +32,10 @@ class SceneTrainer:
         self.optimizer = optimizer
         self.device = device
         self.render_every_steps = render_every_steps
+        self.w_distance = w_distance
+        self.w_l1 = w_l1
+        self.w_eikonal = w_eikonal
+        self.w_normal = w_normal
         self.criterion = nn.MSELoss()
 
         view_mode: str | None = None
@@ -46,30 +54,40 @@ class SceneTrainer:
             )
 
     def train_step(
-        self, step: int, points: torch.Tensor, target_sdf: torch.Tensor
+        self,
+        step: int,
+        points: torch.Tensor,
+        target_sdf: torch.Tensor,
+        target_normals: torch.Tensor | None = None,
     ) -> float:
         self.model.train()
         points = points.to(self.device)
         target_sdf = target_sdf.to(self.device)
+        if target_normals is not None:
+            target_normals = target_normals.to(self.device)
         batch_size = points.shape[0]
 
         batch_embeddings = self.learnable_embeddings.expand(batch_size, -1, -1)
 
-        pred_sdf = self.model(points, batch_embeddings)
-        eikonal_loss = compute_eikonal_loss(
-            self.model, points, embedding=batch_embeddings, use_autograd=False
+        loss_dict = compute_combined_sdf_loss(
+            model=self.model,
+            points=points,
+            target_sdf=target_sdf,
+            target_normals=target_normals,
+            embedding=batch_embeddings,
+            w_distance=self.w_distance,
+            w_l1=self.w_l1,
+            w_eikonal=self.w_eikonal,
+            w_normal=self.w_normal if target_normals is not None else 0.0,
         )
 
-        mse_loss = self.criterion(pred_sdf, target_sdf)
-        l1_loss = torch.nn.functional.l1_loss(pred_sdf, target_sdf)
-
-        loss = mse_loss + 0.5 * l1_loss + 0.1 * eikonal_loss
+        loss = loss_dict["loss"]
 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        loss_val = float(mse_loss.item())
+        loss_val = float(loss_dict["loss"].item())
 
         if (
             self.view
@@ -81,7 +99,7 @@ class SceneTrainer:
                 embedding=self.learnable_embeddings.detach(),
                 device=self.device,
             )
-            self.viewer.update(sdf_obj, step=step, loss=loss_val)
+            self.viewer.update(sdf_obj, step=step, loss=loss_dict)
 
         return loss_val
 

@@ -28,10 +28,12 @@ class Scene4PrimitivesDataset(Dataset):
         points_per_item: int = 256,
         bounds: float = 1.0,
         seed: int = 42,
+        return_normals: bool = False,
     ) -> None:
         super().__init__()
         self.num_samples = num_samples
         self.points_per_item = points_per_item
+        self.return_normals = return_normals
         self.scene = create_4_primitives_scene()
 
         rng = np.random.default_rng(seed)
@@ -68,12 +70,35 @@ class Scene4PrimitivesDataset(Dataset):
         flat_sdfs = self.scene(flat_points).squeeze(-1).astype(np.float32)
         self.sdf_data = flat_sdfs.reshape(num_samples, points_per_item, 1)
 
+        h = 1e-4
+        ex = np.array([1.0, 0.0, 0.0], dtype=np.float32)
+        ey = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        ez = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+
+        dx = (self.scene(flat_points + h * ex) - self.scene(flat_points - h * ex)) / (
+            2 * h
+        )
+        dy = (self.scene(flat_points + h * ey) - self.scene(flat_points - h * ey)) / (
+            2 * h
+        )
+        dz = (self.scene(flat_points + h * ez) - self.scene(flat_points - h * ez)) / (
+            2 * h
+        )
+
+        flat_grads = np.hstack([dx, dy, dz]).astype(np.float32)
+        norms = np.linalg.norm(flat_grads, axis=-1, keepdims=True)
+        flat_normals = flat_grads / np.maximum(norms, 1e-8)
+        self.normal_data = flat_normals.reshape(num_samples, points_per_item, 3)
+
     def __len__(self) -> int:
         return self.num_samples
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, ...]:
         pts = torch.from_numpy(self.points_data[index])
         targets = torch.from_numpy(self.sdf_data[index])
+        if self.return_normals:
+            normals = torch.from_numpy(self.normal_data[index])
+            return pts, targets, normals
         return pts, targets
 
 
@@ -82,11 +107,13 @@ def build_scene_dataloader(
     points_per_item: int = 256,
     batch_size: int = 2,
     seed: int = 42,
+    return_normals: bool = False,
 ) -> DataLoader:
     dataset = Scene4PrimitivesDataset(
         num_samples=num_samples,
         points_per_item=points_per_item,
         seed=seed,
+        return_normals=return_normals,
     )
     return DataLoader(
         dataset,

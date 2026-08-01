@@ -106,6 +106,7 @@ def main() -> int:
         num_samples=args.num_samples,
         points_per_item=args.points_per_item,
         batch_size=args.batch_size,
+        return_normals=True,
     )
 
     trainer = SceneTrainer(
@@ -126,8 +127,12 @@ def main() -> int:
             epoch_loss = 0.0
             num_batches = 0
 
-            for points, targets in dataloader:
-                loss_val = trainer.train_step(global_step, points, targets)
+            for batch in dataloader:
+                points, targets = batch[0], batch[1]
+                target_normals = batch[2] if len(batch) > 2 else None
+                loss_val = trainer.train_step(
+                    global_step, points, targets, target_normals=target_normals
+                )
                 epoch_loss += loss_val
                 num_batches += 1
                 global_step += 1

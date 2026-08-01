@@ -139,10 +139,9 @@ def main() -> int:
     y_val = args.slice_pos if args.slice_axis == "y" else None
     z_val = args.slice_pos if args.slice_axis == "z" else None
 
-    # Determine rendering mode from --view or fallback --mode
     view_mode = args.view
     if view_mode is None:
-        view_mode = "2d" if args.mode == "slice" else "3d"
+        view_mode = "3d"
 
     if view_mode == "2d":
         print(

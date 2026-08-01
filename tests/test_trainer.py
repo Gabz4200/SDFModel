@@ -2,6 +2,7 @@ import tempfile
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 
 from sdfmodel.datasets import build_dataloaders
 from sdfmodel.engine import Trainer, compute_eikonal_loss
@@ -87,3 +88,75 @@ def test_eikonal_loss_with_embedding() -> None:
     )
     assert loss_ag.ndim == 0
     assert loss_ag.item() >= 0.0
+
+
+def test_compute_sdf_normals_methods() -> None:
+    from sdfmodel.engine.metrics import compute_sdf_normals
+
+    model = SDFMLP(in_features=3, hidden_features=32, num_layers=3)
+    points = torch.randn(10, 3)
+
+    for method in ("central", "tetrahedron", "autograd"):
+        normals = compute_sdf_normals(model, points, method=method)
+        assert normals.shape == (10, 3)
+        norms = normals.norm(dim=-1)
+        assert torch.allclose(norms, torch.ones_like(norms), atol=1e-3)
+
+
+def test_compute_normal_loss() -> None:
+    from sdfmodel.engine.metrics import compute_normal_loss
+
+    model = SDFMLP(in_features=3, hidden_features=32, num_layers=3)
+    points = torch.randn(10, 3)
+    target_normals = F.normalize(torch.randn(10, 3), dim=-1)
+
+    loss = compute_normal_loss(model, points, target_normals, method="central")
+    assert loss.ndim == 0
+    assert loss.item() >= 0.0
+
+    loss.backward()
+    param = next(model.parameters())
+    assert param.grad is not None
+
+
+def test_compute_combined_sdf_loss() -> None:
+    from sdfmodel.engine.metrics import compute_combined_sdf_loss
+
+    model = SDFMLP(in_features=3, hidden_features=32, num_layers=3)
+    points = torch.randn(10, 3)
+    target_sdf = torch.randn(10, 1)
+    target_normals = F.normalize(torch.randn(10, 3), dim=-1)
+
+    loss_dict = compute_combined_sdf_loss(
+        model=model,
+        points=points,
+        target_sdf=target_sdf,
+        target_normals=target_normals,
+        w_distance=1.0,
+        w_l1=0.5,
+        w_eikonal=0.1,
+        w_normal=0.2,
+    )
+
+    assert "loss" in loss_dict
+    assert "mse_loss" in loss_dict
+    assert "l1_loss" in loss_dict
+    assert "eikonal_loss" in loss_dict
+    assert "normal_loss" in loss_dict
+
+    total_loss = loss_dict["loss"]
+    assert total_loss.ndim == 0
+    assert total_loss.item() >= 0.0
+
+    expected_val = (
+        1.0 * loss_dict["mse_loss"].item()
+        + 0.5 * loss_dict["l1_loss"].item()
+        + 0.1 * loss_dict["eikonal_loss"].item()
+        + 0.2 * loss_dict["normal_loss"].item()
+    )
+    assert abs(total_loss.item() - expected_val) < 1e-4
+
+    total_loss.backward()
+    param = next(model.parameters())
+    assert param.grad is not None
+
