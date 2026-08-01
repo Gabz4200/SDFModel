@@ -72,12 +72,55 @@ def test_live_sdf_viewer_modes() -> None:
     sdf_obj = create_sdf3_wrapper(model)
 
     viewer_2d = LiveSDFViewer(view_mode="2d", resolution=32)
+    assert viewer_2d.ax_orig is not None
+    assert viewer_2d.ax_recon is not None
+    assert viewer_2d.ax is viewer_2d.ax_recon
     viewer_2d.update(sdf_obj, step=1, loss=0.5)
     viewer_2d.close(keep_open=True)
 
     viewer_3d = LiveSDFViewer(view_mode="3d", step=0.5)
+    assert viewer_3d.ax_orig is not None
+    assert viewer_3d.ax_recon is not None
+    assert viewer_3d.ax_recon._shareview is viewer_3d.ax_orig
+    assert viewer_3d.ax is viewer_3d.ax_recon
     viewer_3d.update(sdf_obj, step=1, loss=0.5)
     viewer_3d.close(keep_open=False)
+
+
+def test_live_sdf_viewer_side_by_side_and_synced_view() -> None:
+    model = SDFMLP(in_features=3, hidden_features=32, num_layers=2)
+    sdf_obj = create_sdf3_wrapper(model)
+
+    viewer = LiveSDFViewer(view_mode="3d", step=0.5)
+    assert viewer.ax_orig is not None
+    assert viewer.ax_recon is not None
+    assert viewer.ax_recon._shareview is viewer.ax_orig
+
+    # Verify 3D view changes sync bidirectionally
+    viewer.ax_orig.view_init(elev=35, azim=60, share=True)
+    assert viewer.ax_recon.elev == 35
+    assert viewer.ax_recon.azim == 60
+
+    viewer.ax_recon.view_init(elev=15, azim=120, share=True)
+    assert viewer.ax_orig.elev == 15
+    assert viewer.ax_orig.azim == 120
+
+    viewer.update(sdf_obj, step=5, loss=0.01)
+    assert viewer.ax_orig.get_title() == "Original Scene"
+    assert "Reconstruction (Step 5)" in viewer.ax_recon.get_title()
+    viewer.close(keep_open=False)
+
+
+def test_live_sdf_viewer_custom_original_sdf() -> None:
+    import sdf
+    custom_orig = sdf.sphere(0.5)
+    model = SDFMLP(in_features=3, hidden_features=32, num_layers=2)
+    sdf_obj = create_sdf3_wrapper(model)
+
+    viewer = LiveSDFViewer(view_mode="2d", resolution=32, original_sdf=custom_orig)
+    assert viewer.original_sdf is custom_orig
+    viewer.update(sdf_obj, step=1, loss=0.1)
+    viewer.close(keep_open=False)
 
 
 def test_live_sdf_viewer_loss_dict_display() -> None:
