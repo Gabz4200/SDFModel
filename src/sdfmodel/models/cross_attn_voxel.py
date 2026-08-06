@@ -1,8 +1,13 @@
 from sdfmodel.models.base_scene import BaseSceneModel
 
 
-class CrossAttnSDFModel(BaseSceneModel):
-    """Implicit Signed Distance Field model using Fourier features and Cross-Attention over scene object embeddings."""
+class CrossAttnVoxelModel(BaseSceneModel):
+    """Implicit Voxel model using Fourier features and Cross-Attention over scene object embeddings.
+
+    For each sampled coordinate, outputs a 4D vector (exist, red, green, blue):
+      - `exist`: sigmoid activation, approaches 1.0 when a voxel is present.
+      - `red`, `green`, `blue`: sigmoid activation, represent color in [0, 1].
+    """
 
     def __init__(
         self,
@@ -14,7 +19,6 @@ class CrossAttnSDFModel(BaseSceneModel):
         fourier_num_bands: int = 6,
         fourier_learnable: bool = False,
         dropout: float = 0.0,
-        use_tanh: bool = False,
         use_scene_token: bool = False,
     ) -> None:
         super().__init__(
@@ -27,7 +31,6 @@ class CrossAttnSDFModel(BaseSceneModel):
             fourier_learnable=fourier_learnable,
             dropout=dropout,
             use_scene_token=use_scene_token,
-            final_activation="tanh" if use_tanh else "none",
-            out_features=1,
+            final_activation="sigmoid",
+            out_features=4,
         )
-        self.use_tanh = use_tanh

@@ -2,6 +2,7 @@ from collections.abc import Callable
 
 from sdfmodel.models.base import BaseModel
 from sdfmodel.models.cross_attn_sdf import CrossAttnSDFModel
+from sdfmodel.models.cross_attn_voxel import CrossAttnVoxelModel
 from sdfmodel.models.sdf_mlp import SDFMLP
 from sdfmodel.models.vector_sdf import VectorSDFModel
 
@@ -18,6 +19,7 @@ def register_model(name: str) -> Callable[[type[BaseModel]], type[BaseModel]]:
 
 register_model("sdf_mlp")(SDFMLP)
 register_model("cross_attn_sdf")(CrossAttnSDFModel)
+register_model("cross_attn_voxel")(CrossAttnVoxelModel)
 register_model("vector_sdf")(VectorSDFModel)
 
 
@@ -35,6 +37,7 @@ __all__ = [
     "SDFMLP",
     "BaseModel",
     "CrossAttnSDFModel",
+    "CrossAttnVoxelModel",
     "VectorSDFModel",
     "build_model",
     "list_models",

@@ -187,7 +187,7 @@ def test_cross_attn_sdf_chunked_forward() -> None:
 
 def test_cross_attn_block_has_no_self_attention_layers() -> None:
     """Transformer block must not contain self-attention layers on object embeddings."""
-    from sdfmodel.models.cross_attn_sdf import CrossAttentionTransformerBlock
+    from sdfmodel.models.transformer_block import CrossAttentionTransformerBlock
 
     block = CrossAttentionTransformerBlock(hidden_dim=32, num_heads=2)
     assert not hasattr(block, "obj_self_attn")
