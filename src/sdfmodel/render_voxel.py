@@ -61,6 +61,7 @@ def create_voxel_model(
     # voxelmap expects a 3D occupancy array (Z, X, Y)
     voxel_array = (pred[..., 0] > 0.5).astype(np.float32)
     vm = Model(array=voxel_array)
+    vm.__dict__["_rgb"] = np.clip(pred[..., 1:], 0.0, 1.0).astype(np.float32)
     vm.objfile = "voxel_scene.obj"
     return vm
 

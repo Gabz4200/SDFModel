@@ -5,9 +5,10 @@ Trains SDF models (CrossAttnSDFModel or VectorSDFModel) and learnable object emb
 """
 
 import argparse
-import contextlib
 import sys
 
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 
 from sdfmodel.datasets import build_scene_dataloader, build_voxel_dataloader
@@ -17,7 +18,6 @@ from sdfmodel.render import create_sdf3_wrapper, export_sdf_mesh
 from sdfmodel.render_voxel import (
     create_voxel_model,
     export_voxel_obj,
-    render_voxel_slice,
 )
 
 
@@ -101,8 +101,9 @@ def main() -> int:
     embeddings = torch.nn.Parameter(torch.randn(args.num_tokens, hidden_dim, device=device))
     optimizer = torch.optim.Adam(list(model.parameters()) + [embeddings], lr=args.lr)
 
+    voxel_dataset = None
     if args.model_type == "voxel":
-        dataloader = build_voxel_dataloader(
+        dataloader, voxel_dataset = build_voxel_dataloader(
             voxel_path="data/donutvoxel.vox",
             num_samples=args.num_samples,
             points_per_item=args.points_per_item,
@@ -126,7 +127,9 @@ def main() -> int:
         mse = torch.nn.MSELoss()
         model.train()
         voxel_viewer = None
+        plt.ion()
         render_every = max(1, args.render_every_steps)
+        assert voxel_dataset is not None
         for epoch in range(args.epochs):
             epoch_loss = 0.0
             for step, (pts, targets) in enumerate(dataloader, start=1):
@@ -147,70 +150,76 @@ def main() -> int:
                     args.view in ("2d", "3d")
                     and step % render_every == 0
                 ):
-                    voxel_model_eval = model
-                    grid_shape = (
-                        args.render_resolution,
-                        args.render_resolution,
-                        args.render_resolution,
-                    )
                     vm = create_voxel_model(
-                        voxel_model_eval,
+                        model,
                         embedding=embeddings,
                         device=device,
-                        grid_shape=grid_shape,
+                        grid_shape=(
+                            args.render_resolution,
+                            args.render_resolution,
+                            args.render_resolution,
+                        ),
                     )
-                    import matplotlib.pyplot as plt
+                    original_voxels = voxel_dataset.voxel_array[..., 0] > 0.5
+                    original_rgb = voxel_dataset.voxel_array[..., 1:]
+                    recon_voxels = vm.build()
+                    recon_rgb = vm.__dict__.get("_rgb", np.zeros((*recon_voxels.shape, 3)))
 
-                    if voxel_viewer is not None:
-                        with contextlib.suppress(Exception):
-                            plt.close(voxel_viewer)
                     if args.view == "2d":
-                        img = render_voxel_slice(
-                            vm,
-                            axis="z",
-                            show=False,
-                            title=(
-                                f"Voxel Slice - Epoch {epoch+1} Step {step}"
-                            ),
-                        )
-                        fig, ax = plt.subplots(figsize=(6, 6))
-                        ax.imshow(img)
-                        ax.set_title(
-                            f"Voxel Slice - Epoch {epoch+1} Step {step}"
-                        )
-                        ax.axis("off")
+                        fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(10, 5))
+                        for ax, voxels, rgb, title in [
+                            (ax0, original_voxels, original_rgb, "Original"),
+                            (ax1, recon_voxels, recon_rgb, "Reconstruction"),
+                        ]:
+                            z = voxels.shape[0] // 2
+                            slice_2d = voxels[z, :, :]
+                            colors = rgb[z, :, :]
+                            img = np.zeros((*slice_2d.shape, 3), dtype=float)
+                            img[slice_2d] = colors[slice_2d]
+                            ax.imshow(img)
+                            ax.set_title(f"{title} - Z center slice")
+                            ax.axis("off")
                         voxel_viewer = fig
                     else:
-                        img_xy = render_voxel_slice(
-                            vm, axis="z", show=False
-                        )
-                        img_xz = render_voxel_slice(
-                            vm, axis="y", show=False
-                        )
-                        img_yz = render_voxel_slice(
-                            vm, axis="x", show=False
-                        )
-                        fig, axes = plt.subplots(
-                            1, 3, figsize=(12, 4)
-                        )
-                        axes[0].imshow(img_xy)
-                        axes[0].set_title("XY slice")
-                        axes[0].axis("off")
-                        axes[1].imshow(img_xz)
-                        axes[1].set_title("XZ slice")
-                        axes[1].axis("off")
-                        axes[2].imshow(img_yz)
-                        axes[2].set_title("YZ slice")
-                        axes[2].axis("off")
-                        fig.suptitle(
-                            f"Voxel 3D Slices - Epoch {epoch+1} Step {step}"
-                        )
-                        voxel_viewer = fig
+                        if voxel_viewer is None:
+                            fig = plt.figure(figsize=(12, 6))
+                            ax0 = fig.add_subplot(1, 2, 1, projection="3d")
+                            ax1 = fig.add_subplot(1, 2, 2, projection="3d")
+                            voxel_viewer = fig
+                        else:
+                            fig = voxel_viewer
+                            ax0, ax1 = fig.axes
+                            ax0.clear()
+                            ax1.clear()
+
+                        for ax, voxels, rgb, title in [
+                            (ax0, original_voxels, original_rgb, "Original"),
+                            (ax1, recon_voxels, recon_rgb, "Reconstruction"),
+                        ]:
+                            voxcolors = np.ones((*voxels.shape, 4), dtype=float)
+                            mask = voxels
+                            voxcolors[mask, :3] = rgb[mask]
+                            voxcolors[mask, 3] = 0.85
+                            ax.voxels(  # type: ignore[attr-defined]
+                                voxels,
+                                facecolors=voxcolors,
+                                edgecolors="gray",
+                                linewidth=0.3,
+                            )
+                            ax.set_title(f"{title} - Epoch {epoch+1} Step {step}")
+                            ax.set_box_aspect(1.0)  # type: ignore[arg-type]
+                            ax.set_xlabel("X")
+                            ax.set_ylabel("Y")
+                            ax.set_zlabel("Z")  # type: ignore[attr-defined]
+
                     fig.canvas.draw_idle()
                     fig.canvas.flush_events()
                     plt.pause(0.01)
 
             print(f"Epoch {epoch+1}/{args.epochs} - Loss: {epoch_loss/len(dataloader):.6f}")
+        if voxel_viewer is not None:
+            plt.ioff()
+            plt.show()
     else:
         trainer = SceneTrainer(
             model=model,

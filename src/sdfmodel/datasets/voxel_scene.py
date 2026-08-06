@@ -54,6 +54,15 @@ class VoxelSceneDataset(Dataset):
         self._num_occ = len(self._occ_coords)
         self._num_empty = len(self._empty_coords)
 
+    @property
+    def voxel_array_4d(self) -> np.ndarray:
+        out = np.zeros((*self.grid_shape, 4), dtype=np.float32)
+        out[self.occ_mask] = np.concatenate([
+            np.ones((self.occ_mask.sum(), 1), dtype=np.float32),
+            self.color_grid[self.occ_mask],
+        ], axis=1)
+        return out
+
     def _sample_items(self, seed: int) -> None:
         rng = np.random.default_rng(seed)
         n_occ = self.points_per_item // 2
@@ -214,11 +223,11 @@ def build_voxel_dataloader(
     points_per_item: int = 256,
     batch_size: int = 2,
     seed: int = 42,
-) -> DataLoader:
+) -> tuple[DataLoader, VoxelSceneDataset]:
     dataset = VoxelSceneDataset(
         voxel_path=voxel_path,
         num_samples=num_samples,
         points_per_item=points_per_item,
         seed=seed,
     )
-    return DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    return DataLoader(dataset, batch_size=batch_size, shuffle=True), dataset
