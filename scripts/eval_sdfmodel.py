@@ -65,11 +65,32 @@ def main() -> int:
 
     hidden_dim = checkpoint.get("hidden_dim", 64)
     num_layers = checkpoint.get("num_layers", 4)
+    model_type = checkpoint.get("model_type", "scalar_sdf")
+    fourier_num_bands = checkpoint.get("fourier_num_bands", 6)
+    use_scene_token = checkpoint.get("use_scene_token", False)
 
-    print(
-        f"Initializing CrossAttnSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}) on device '{device}'..."
-    )
-    model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=num_layers).to(device)
+    if model_type == "vector_sdf":
+        print(
+            f"Initializing VectorSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}, fourier_bands={fourier_num_bands}, scene_token={use_scene_token}) on device '{device}'..."
+        )
+        from sdfmodel.models import VectorSDFModel
+
+        model = VectorSDFModel(
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            fourier_num_bands=fourier_num_bands,
+            use_scene_token=use_scene_token,
+        ).to(device)
+    else:
+        print(
+            f"Initializing CrossAttnSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}, fourier_bands={fourier_num_bands}, scene_token={use_scene_token}) on device '{device}'..."
+        )
+        model = CrossAttnSDFModel(
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            fourier_num_bands=fourier_num_bands,
+            use_scene_token=use_scene_token,
+        ).to(device)
 
     model_state = checkpoint.get("model_state", checkpoint)
     model.load_state_dict(model_state)
@@ -81,8 +102,9 @@ def main() -> int:
         print(
             "Warning: No 'embedding_state' found in checkpoint; initializing default embeddings..."
         )
+        seq_len = checkpoint.get("num_tokens", 4)
         embedding = CrossAttnSDFModel.create_learnable_embedding(
-            batch_size=1, seq_len=4, hidden_dim=hidden_dim, device=torch.device(device)
+            batch_size=1, seq_len=seq_len, hidden_dim=hidden_dim, device=torch.device(device)
         )
 
     print(

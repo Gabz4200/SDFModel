@@ -9,7 +9,7 @@ import sys
 
 import torch
 
-from sdfmodel.models import CrossAttnSDFModel, build_model, list_models
+from sdfmodel.models import CrossAttnSDFModel, VectorSDFModel, build_model, list_models
 from sdfmodel.render import (
     create_sdf3_wrapper,
     export_sdf_mesh,
@@ -103,34 +103,67 @@ def main() -> int:
 
     print(f"Initializing model '{args.model}' on device '{device}'...")
 
-    if args.model == "cross_attn_sdf":
-        model: torch.nn.Module = CrossAttnSDFModel(
-            hidden_dim=args.hidden_dim,
-            num_layers=args.num_layers,
+    if args.checkpoint:
+        print(f"Loading weights from '{args.checkpoint}'...")
+        checkpoint = torch.load(
+            args.checkpoint, map_location=device, weights_only=False
+        )
+        state_dict = checkpoint.get("model_state", checkpoint)
+        hidden_dim = checkpoint.get("hidden_dim", args.hidden_dim)
+        num_layers = checkpoint.get("num_layers", args.num_layers)
+        fourier_num_bands = checkpoint.get("fourier_num_bands", 6)
+        use_scene_token = checkpoint.get("use_scene_token", False)
+        seq_len = checkpoint.get("num_tokens", 4)
+        embedding_state = checkpoint.get("embedding_state")
+        model_type = checkpoint.get("model_type", args.model)
+    else:
+        state_dict = None
+        hidden_dim = args.hidden_dim
+        num_layers = args.num_layers
+        fourier_num_bands = 6
+        use_scene_token = False
+        seq_len = 4
+        embedding_state = None
+        model_type = args.model
+
+    if model_type == "vector_sdf":
+        model: torch.nn.Module = VectorSDFModel(
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            fourier_num_bands=fourier_num_bands,
+            use_scene_token=use_scene_token,
+        )
+    elif model_type == "cross_attn_sdf":
+        model = CrossAttnSDFModel(
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            fourier_num_bands=fourier_num_bands,
+            use_scene_token=use_scene_token,
         )
     else:
         model = build_model(
-            args.model,
-            hidden_features=args.hidden_dim,
-            num_layers=args.num_layers,
+            model_type,
+            hidden_features=hidden_dim,
+            num_layers=num_layers,
         )
 
-    if args.checkpoint:
-        print(f"Loading weights from '{args.checkpoint}'...")
-        state_dict = torch.load(args.checkpoint, map_location=device)
+    if state_dict is not None:
         model.load_state_dict(state_dict)
 
     model = model.to(device).eval()
 
-    # Create learnable embedding if model is CrossAttnSDFModel
+    # Create learnable embedding for attention-based models
     embedding = None
-    if isinstance(model, CrossAttnSDFModel):
-        embedding = CrossAttnSDFModel.create_learnable_embedding(
-            batch_size=1,
-            seq_len=4,
-            hidden_dim=args.hidden_dim,
-            device=torch.device(device),
-        )
+    if isinstance(model, (CrossAttnSDFModel, VectorSDFModel)):
+        if embedding_state is not None:
+            embedding = embedding_state.to(device)
+        else:
+            embedding = CrossAttnSDFModel.create_learnable_embedding(
+                batch_size=1,
+                seq_len=seq_len,
+                hidden_dim=hidden_dim,
+                device=torch.device(device),
+            )
 
     print("Wrapping model in fogleman/sdf SDF3 interface...")
     sdf_obj = create_sdf3_wrapper(model, embedding=embedding, device=device)

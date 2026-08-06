@@ -71,11 +71,15 @@ def run_render(args: argparse.Namespace) -> int:
         model = CrossAttnSDFModel(
             hidden_dim=args.hidden_dim,
             num_layers=args.num_layers,
+            fourier_num_bands=args.fourier_bands,
+            use_scene_token=args.use_scene_token,
         )
     elif args.model == "vector_sdf":
         model = VectorSDFModel(
             hidden_dim=args.hidden_dim,
             num_layers=args.num_layers,
+            fourier_num_bands=args.fourier_bands,
+            use_scene_token=args.use_scene_token,
         )
     else:
         model = build_model(
@@ -84,10 +88,41 @@ def run_render(args: argparse.Namespace) -> int:
             num_layers=args.num_layers,
         )
 
+    num_tokens = args.num_tokens
+    checkpoint = None
     if args.checkpoint:
         print(f"Loading weights from '{args.checkpoint}'...")
-        state_dict = torch.load(args.checkpoint, map_location=device)
-        model.load_state_dict(state_dict)
+        checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
+        if isinstance(model, (CrossAttnSDFModel, VectorSDFModel)):
+            # Checkpoint architecture flags are authoritative: rebuild when any
+            # of them differs from the CLI args (band count, layers, hidden dim,
+            # and scene token all change state_dict shapes).
+            ckpt_hidden = checkpoint.get("hidden_dim", args.hidden_dim)
+            ckpt_layers = checkpoint.get("num_layers", args.num_layers)
+            ckpt_bands = checkpoint.get("fourier_num_bands", args.fourier_bands)
+            ckpt_token = checkpoint.get("use_scene_token", args.use_scene_token)
+            if (ckpt_hidden, ckpt_layers, ckpt_bands, ckpt_token) != (
+                args.hidden_dim,
+                args.num_layers,
+                args.fourier_bands,
+                args.use_scene_token,
+            ):
+                if isinstance(model, VectorSDFModel):
+                    model = VectorSDFModel(
+                        hidden_dim=ckpt_hidden,
+                        num_layers=ckpt_layers,
+                        fourier_num_bands=ckpt_bands,
+                        use_scene_token=ckpt_token,
+                    )
+                else:
+                    model = CrossAttnSDFModel(
+                        hidden_dim=ckpt_hidden,
+                        num_layers=ckpt_layers,
+                        fourier_num_bands=ckpt_bands,
+                        use_scene_token=ckpt_token,
+                    )
+            num_tokens = checkpoint.get("num_tokens", num_tokens)
+        model.load_state_dict(checkpoint.get("model_state", checkpoint))
 
     model = model.to(device).eval()
 
@@ -95,10 +130,12 @@ def run_render(args: argparse.Namespace) -> int:
     if isinstance(model, (CrossAttnSDFModel, VectorSDFModel)):
         embedding = CrossAttnSDFModel.create_learnable_embedding(
             batch_size=1,
-            seq_len=4,
-            hidden_dim=args.hidden_dim,
+            seq_len=num_tokens,
+            hidden_dim=model.hidden_dim,
             device=torch.device(device),
         )
+        if checkpoint is not None and "embedding_state" in checkpoint:
+            embedding.data.copy_(checkpoint["embedding_state"].to(device))
 
     print("Wrapping model in fogleman/sdf SDF3 interface...")
     sdf_obj = create_sdf3_wrapper(model, embedding=embedding, device=device)
@@ -158,24 +195,39 @@ def run_train_scene(args: argparse.Namespace) -> int:
     model_type = getattr(args, "model_type", "scalar_sdf")
     assert model_type in ("scalar_sdf", "vector_sdf")
 
+    num_tokens = getattr(args, "num_tokens", 8)
+    fourier_bands = getattr(args, "fourier_bands", 8)
+    use_scene_token = getattr(args, "use_scene_token", False)
+    surface_eps = getattr(args, "surface_eps", 0.1)
+    sampler = getattr(args, "sampler", "chaos_game")
+    chaos_iters = getattr(args, "chaos_iters", 4)
+    vector_warmup = getattr(args, "vector_warmup", 0)
+    log_every = getattr(args, "log_every", 10)
+
     if model_type == "vector_sdf":
         print(
-            f"Initializing VectorSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}) and 4 learnable embeddings..."
+            f"Initializing VectorSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}, {num_tokens} tokens) and {num_tokens} learnable embeddings..."
         )
         model = VectorSDFModel(
-            hidden_dim=args.hidden_dim, num_layers=args.num_layers
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            fourier_num_bands=fourier_bands,
+            use_scene_token=use_scene_token,
         ).to(device)
     else:
         print(
-            f"Initializing CrossAttnSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}) and 4 learnable embeddings..."
+            f"Initializing CrossAttnSDFModel (hidden_dim={args.hidden_dim}, num_layers={args.num_layers}, {num_tokens} tokens) and {num_tokens} learnable embeddings..."
         )
         model = CrossAttnSDFModel(
-            hidden_dim=args.hidden_dim, num_layers=args.num_layers
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            fourier_num_bands=fourier_bands,
+            use_scene_token=use_scene_token,
         ).to(device)
 
     embeddings = CrossAttnSDFModel.create_learnable_embedding(
         batch_size=1,
-        seq_len=4,
+        seq_len=num_tokens,
         hidden_dim=args.hidden_dim,
         device=torch.device(device),
     )
@@ -190,8 +242,12 @@ def run_train_scene(args: argparse.Namespace) -> int:
         points_per_item=args.points_per_item,
         batch_size=args.batch_size,
         return_normals=True,
+        surface_eps=surface_eps,
+        sampler=sampler,
+        chaos_iters=chaos_iters,
     )
 
+    total_steps = len(dataloader) * args.epochs
     trainer = SceneTrainer(
         model=model,
         learnable_embeddings=embeddings,
@@ -202,6 +258,18 @@ def run_train_scene(args: argparse.Namespace) -> int:
         render_every_steps=args.render_every_steps,
         render_resolution=args.render_resolution,
         model_type=model_type,
+        total_steps=total_steps,
+        vector_warmup_steps=vector_warmup,
+        log_every_steps=log_every,
+        # Tuned weights: balance distance against eikonal + normal consistency.
+        w_distance=1.0,
+        w_l1=0.5,
+        w_eikonal=0.2,
+        w_normal=0.5,
+        w_vector_l2=1.0,
+        w_cosine=0.8,
+        w_magnitude_mse=0.5,
+        w_consistency=0.3,
     )
 
     print("Starting 4-primitive scene training loop...")
@@ -238,6 +306,9 @@ def run_train_scene(args: argparse.Namespace) -> int:
                 "embedding_state": embeddings.data,
                 "hidden_dim": args.hidden_dim,
                 "num_layers": args.num_layers,
+                "num_tokens": num_tokens,
+                "fourier_num_bands": fourier_bands,
+                "use_scene_token": use_scene_token,
                 "model_type": model_type,
             },
             args.save_checkpoint,
@@ -269,17 +340,29 @@ def run_eval_sdfmodel(args: argparse.Namespace) -> int:
     hidden_dim = checkpoint.get("hidden_dim", 64)
     num_layers = checkpoint.get("num_layers", 4)
     model_type = checkpoint.get("model_type", "scalar_sdf")
+    fourier_num_bands = checkpoint.get("fourier_num_bands", 6)
+    use_scene_token = checkpoint.get("use_scene_token", False)
 
     if model_type == "vector_sdf":
         print(
-            f"Initializing VectorSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}) on device '{device}'..."
+            f"Initializing VectorSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}, fourier_bands={fourier_num_bands}, scene_token={use_scene_token}) on device '{device}'..."
         )
-        model = VectorSDFModel(hidden_dim=hidden_dim, num_layers=num_layers).to(device)
+        model = VectorSDFModel(
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            fourier_num_bands=fourier_num_bands,
+            use_scene_token=use_scene_token,
+        ).to(device)
     else:
         print(
-            f"Initializing CrossAttnSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}) on device '{device}'..."
+            f"Initializing CrossAttnSDFModel (hidden_dim={hidden_dim}, num_layers={num_layers}, fourier_bands={fourier_num_bands}, scene_token={use_scene_token}) on device '{device}'..."
         )
-        model = CrossAttnSDFModel(hidden_dim=hidden_dim, num_layers=num_layers).to(device)
+        model = CrossAttnSDFModel(
+            hidden_dim=hidden_dim,
+            num_layers=num_layers,
+            fourier_num_bands=fourier_num_bands,
+            use_scene_token=use_scene_token,
+        ).to(device)
 
     model_state = checkpoint.get("model_state", checkpoint)
     model.load_state_dict(model_state)
@@ -291,8 +374,9 @@ def run_eval_sdfmodel(args: argparse.Namespace) -> int:
         print(
             "Warning: No 'embedding_state' found in checkpoint; initializing default embeddings..."
         )
+        seq_len = checkpoint.get("num_tokens", 4)
         embedding = CrossAttnSDFModel.create_learnable_embedding(
-            batch_size=1, seq_len=4, hidden_dim=hidden_dim, device=torch.device(device)
+            batch_size=1, seq_len=seq_len, hidden_dim=hidden_dim, device=torch.device(device)
         )
 
     print(
@@ -411,6 +495,23 @@ def main() -> int:
         choices=["2d", "3d"],
         help="Visualization view mode: '2d' slice or '3d' isosurface mesh (defaults to '3d' if --view is specified without value)",
     )
+    render_parser.add_argument(
+        "--fourier-bands",
+        type=int,
+        default=6,
+        help="Number of Fourier bands for cross-attn/vector models",
+    )
+    render_parser.add_argument(
+        "--num-tokens",
+        type=int,
+        default=8,
+        help="Learnable object token count for cross-attn/vector models",
+    )
+    render_parser.add_argument(
+        "--use-scene-token",
+        action="store_true",
+        help="Use a learnable scene summary token (must match checkpoint)",
+    )
 
     # Train scene command
     scene_parser = subparsers.add_parser(
@@ -476,6 +577,54 @@ def main() -> int:
         type=str,
         default=None,
         help="Path to export final reconstructed 3D mesh (.stl)",
+    )
+    scene_parser.add_argument(
+        "--num-tokens",
+        type=int,
+        default=8,
+        help="Learnable object token count (default 8: 4 primitives x 2 slots)",
+    )
+    scene_parser.add_argument(
+        "--surface-eps",
+        type=float,
+        default=0.1,
+        help="Surface-band sampling threshold for near-surface points",
+    )
+    scene_parser.add_argument(
+        "--sampler",
+        choices=("chaos_game", "rejection"),
+        default="chaos_game",
+        help="Near-surface sampling strategy: chaos_game (iterative surface projection, "
+        "default) or rejection (uniform rejection inside surface_eps)",
+    )
+    scene_parser.add_argument(
+        "--chaos-iters",
+        type=int,
+        default=4,
+        help="Chaos-game warm-up iterations (project + jitter rounds)",
+    )
+    scene_parser.add_argument(
+        "--fourier-bands",
+        type=int,
+        default=8,
+        help="Number of Fourier bands (annealed from 4 up to this value)",
+    )
+    scene_parser.add_argument(
+        "--use-scene-token",
+        action="store_true",
+        help="Add a learnable scene summary token coords attend to",
+    )
+    scene_parser.add_argument(
+        "--vector-warmup",
+        type=int,
+        default=0,
+        help="Scalar-only warmup steps before enabling vector losses",
+    )
+    scene_parser.add_argument(
+        "--log-every",
+        type=int,
+        default=10,
+        help="Print per-term loss breakdown every N steps",
     )
     # Eval SDF Model command
     eval_parser = subparsers.add_parser(
