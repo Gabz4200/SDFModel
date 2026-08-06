@@ -218,6 +218,26 @@ class SceneTrainer:
 
         return loss_val
 
+    def fit(self, epochs: int) -> dict[str, float]:
+        """Run the training loop for the given number of epochs."""
+        epoch_losses: list[float] = []
+
+        for epoch in range(epochs):
+            epoch_loss = 0.0
+            for step, (points, target_sdf, *rest) in enumerate(
+                self.dataloader, start=1
+            ):
+                target_normals = rest[0] if rest else None
+                epoch_loss += self.train_step(
+                    step, points, target_sdf, target_normals
+                )
+            avg = epoch_loss / max(len(self.dataloader), 1)
+            print(f"Epoch {epoch+1}/{epochs} - Loss: {avg:.6f}")
+            epoch_losses.append(avg)
+
+        self.close(keep_open=True)
+        return {"final_loss": epoch_losses[-1] if epoch_losses else float("inf")}
+
     def close(self, keep_open: bool = True) -> None:
         if self.viewer is not None:
             self.viewer.close(keep_open=keep_open)

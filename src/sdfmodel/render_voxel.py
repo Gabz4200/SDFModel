@@ -1,17 +1,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import torch
 from voxelmap import Model
 
-from sdfmodel.models.base_scene import BaseSceneModel
+from sdfmodel.models.base import BaseModel
 
 
 def create_voxel_model(
-    model: BaseSceneModel,
+    model: BaseModel,
     embedding: torch.Tensor | None = None,
     device: str = "cpu",
     grid_shape: tuple[int, int, int] | None = None,
@@ -72,26 +71,33 @@ def render_voxel_slice(
     show: bool = True,
     title: str = "Voxel Slice",
 ) -> np.ndarray:
-    """Render a 2D slice through the voxel model."""
+    """Render a 2D slice through the voxel model using `build()` + axis index."""
     axis = axis.lower()
     if axis not in ("x", "y", "z"):
         raise ValueError(f"Unknown axis '{axis}'")
-    slice_kwargs: dict[str, Any] = {"show": show}
-    if axis == "x":
-        slice_kwargs["x"] = pos
-    elif axis == "y":
-        slice_kwargs["y"] = pos
-    else:
-        slice_kwargs["z"] = pos
 
-    img = voxel_model.slice(**slice_kwargs)
-    if hasattr(img, "get"):
-        img = np.asarray(img)
+    voxels = voxel_model.build()
+    z, y, x = voxels.shape
+
+    if axis == "x":
+        idx = int(pos * x) if pos is not None else x // 2
+        idx = max(0, min(x - 1, idx))
+        img = voxels[:, :, idx].astype(np.float32)
+    elif axis == "y":
+        idx = int(pos * y) if pos is not None else y // 2
+        idx = max(0, min(y - 1, idx))
+        img = voxels[:, idx, :].astype(np.float32)
+    else:
+        idx = int(pos * z) if pos is not None else z // 2
+        idx = max(0, min(z - 1, idx))
+        img = voxels[idx, :, :].astype(np.float32)
+
     if show:
         import matplotlib.pyplot as plt
 
         plt.title(title)
         plt.axis("off")
+        plt.imshow(img, cmap="gray", interpolation="none")
         plt.show()
     return img
 

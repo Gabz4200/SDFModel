@@ -5,6 +5,7 @@ Trains SDF models (CrossAttnSDFModel or VectorSDFModel) and learnable object emb
 """
 
 import argparse
+import contextlib
 import sys
 
 import torch
@@ -13,7 +14,11 @@ from sdfmodel.datasets import build_scene_dataloader, build_voxel_dataloader
 from sdfmodel.engine import SceneTrainer
 from sdfmodel.models import CrossAttnSDFModel, VectorSDFModel
 from sdfmodel.render import create_sdf3_wrapper, export_sdf_mesh
-from sdfmodel.render_voxel import create_voxel_model, export_voxel_obj
+from sdfmodel.render_voxel import (
+    create_voxel_model,
+    export_voxel_obj,
+    render_voxel_slice,
+)
 
 
 def main() -> int:
@@ -92,7 +97,7 @@ def main() -> int:
             use_scene_token=args.use_scene_token,
         ).to(device)
 
-    hidden_dim: int = int(model.hidden_dim)
+    hidden_dim = args.hidden_dim
     embeddings = torch.nn.Parameter(torch.randn(args.num_tokens, hidden_dim, device=device))
     optimizer = torch.optim.Adam(list(model.parameters()) + [embeddings], lr=args.lr)
 
@@ -120,9 +125,11 @@ def main() -> int:
         bce = torch.nn.BCELoss()
         mse = torch.nn.MSELoss()
         model.train()
+        voxel_viewer = None
+        render_every = max(1, args.render_every_steps)
         for epoch in range(args.epochs):
             epoch_loss = 0.0
-            for pts, targets in dataloader:
+            for step, (pts, targets) in enumerate(dataloader, start=1):
                 pts = pts.to(device)
                 targets = targets.to(device)
                 coords = pts[..., :3]
@@ -135,6 +142,74 @@ def main() -> int:
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
+
+                if (
+                    args.view in ("2d", "3d")
+                    and step % render_every == 0
+                ):
+                    voxel_model_eval = model
+                    grid_shape = (
+                        args.render_resolution,
+                        args.render_resolution,
+                        args.render_resolution,
+                    )
+                    vm = create_voxel_model(
+                        voxel_model_eval,
+                        embedding=embeddings,
+                        device=device,
+                        grid_shape=grid_shape,
+                    )
+                    import matplotlib.pyplot as plt
+
+                    if voxel_viewer is not None:
+                        with contextlib.suppress(Exception):
+                            plt.close(voxel_viewer)
+                    if args.view == "2d":
+                        img = render_voxel_slice(
+                            vm,
+                            axis="z",
+                            show=False,
+                            title=(
+                                f"Voxel Slice - Epoch {epoch+1} Step {step}"
+                            ),
+                        )
+                        fig, ax = plt.subplots(figsize=(6, 6))
+                        ax.imshow(img)
+                        ax.set_title(
+                            f"Voxel Slice - Epoch {epoch+1} Step {step}"
+                        )
+                        ax.axis("off")
+                        voxel_viewer = fig
+                    else:
+                        img_xy = render_voxel_slice(
+                            vm, axis="z", show=False
+                        )
+                        img_xz = render_voxel_slice(
+                            vm, axis="y", show=False
+                        )
+                        img_yz = render_voxel_slice(
+                            vm, axis="x", show=False
+                        )
+                        fig, axes = plt.subplots(
+                            1, 3, figsize=(12, 4)
+                        )
+                        axes[0].imshow(img_xy)
+                        axes[0].set_title("XY slice")
+                        axes[0].axis("off")
+                        axes[1].imshow(img_xz)
+                        axes[1].set_title("XZ slice")
+                        axes[1].axis("off")
+                        axes[2].imshow(img_yz)
+                        axes[2].set_title("YZ slice")
+                        axes[2].axis("off")
+                        fig.suptitle(
+                            f"Voxel 3D Slices - Epoch {epoch+1} Step {step}"
+                        )
+                        voxel_viewer = fig
+                    fig.canvas.draw_idle()
+                    fig.canvas.flush_events()
+                    plt.pause(0.01)
+
             print(f"Epoch {epoch+1}/{args.epochs} - Loss: {epoch_loss/len(dataloader):.6f}")
     else:
         trainer = SceneTrainer(
@@ -155,7 +230,7 @@ def main() -> int:
             w_eikonal=0.2,
             w_normal=0.5,
         )
-        trainer.fit()
+        trainer.fit(epochs=args.epochs)
 
     if args.save_checkpoint:
         print(f"Saving checkpoint to '{args.save_checkpoint}'...")
