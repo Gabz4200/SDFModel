@@ -20,15 +20,16 @@ def create_sdf3_wrapper(
     embedding: torch.Tensor | None = None,
     batch_size: int = 65536,
     device: str = "cpu",
+    seq_len: int = 4,
 ) -> sdf.d3.SDF3:
     """Wrap a PyTorch implicit SDF model into an sdf.d3.SDF3 object for rendering."""
     model = model.to(device).eval()
 
-    if isinstance(model, CrossAttnSDFModel):
+    if isinstance(model, (CrossAttnSDFModel, VectorSDFModel)):
         if embedding is None:
             embedding = CrossAttnSDFModel.create_learnable_embedding(
                 batch_size=1,
-                seq_len=4,
+                seq_len=seq_len,
                 hidden_dim=model.hidden_dim,
                 device=torch.device(device),
             )
@@ -350,6 +351,18 @@ class LiveSDFViewer:
             if "normal_loss" in loss:
                 v = _to_float(loss["normal_loss"])
                 sub_parts.append(f"Normal: {v:.4f}")
+            if "vector_l2_loss" in loss:
+                v = _to_float(loss["vector_l2_loss"])
+                sub_parts.append(f"VecL2: {v:.4f}")
+            if "cosine_loss" in loss:
+                v = _to_float(loss["cosine_loss"])
+                sub_parts.append(f"Cos: {v:.4f}")
+            if "magnitude_mse_loss" in loss:
+                v = _to_float(loss["magnitude_mse_loss"])
+                sub_parts.append(f"Mag: {v:.4f}")
+            if "consistency_loss" in loss:
+                v = _to_float(loss["consistency_loss"])
+                sub_parts.append(f"Consist: {v:.4f}")
 
             if sub_parts:
                 parts.append(f"({ ' | '.join(sub_parts) })")

@@ -26,11 +26,21 @@ def _scalar_wrapper(
     if isinstance(model, VectorSDFModel):
         if embedding is not None:
             return model.predict_scalar(points, embedding)
-        # For VectorSDFModel without embedding, raise - embedding is required
         raise ValueError("VectorSDFModel requires an embedding parameter")
     if embedding is not None:
         return model(points, embedding)
     return model(points)
+
+
+class ScalarModelWrapper(nn.Module):
+    """Wrap a VectorSDFModel (or any model) to expose scalar SDF output."""
+
+    def __init__(self, m: nn.Module) -> None:
+        super().__init__()
+        self.m = m
+
+    def forward(self, pts: torch.Tensor, emb: torch.Tensor | None = None) -> torch.Tensor:
+        return _scalar_wrapper(self.m, pts, emb)
 
 
 def compute_eikonal_loss(
@@ -218,48 +228,36 @@ def compute_vector_sdf_loss(
     w_magnitude_mse: float = 1.0,
     w_eikonal: float = 0.1,
     w_normal: float = 0.2,
+    w_consistency: float = 0.0,
     normal_method: str = "central",
     use_autograd_eikonal: bool = False,
 ) -> dict[str, torch.Tensor]:
     """Compute vector-specific SDF training loss.
 
-    Target vector is computed as target_sdf * target_normals.
+    Target vector is ``target_sdf * target_normals``.
+    With a learned direction head the vector field satisfies ``|v| == |f|`` by
+    construction; an optional consistency term aligns the learned direction
+    with the finite-difference gradient of the scalar field.
     """
-    # Vector model forward returns pred_vector (B, N, 3) or (N, 3)
     pred_vector = _eval_model(model, points, embedding)
+    scalar_model = ScalarModelWrapper(model)
 
-    # Eikonal Loss on scalar SDF (via predict_scalar)
-    # Create a wrapper module for scalar evaluation
-    class _ScalarModelWrapper(nn.Module):
-        def __init__(self, m):
-            super().__init__()
-            self.m = m
-        def forward(self, pts, emb=None):
-            return _scalar_wrapper(self.m, pts, emb)
-    
-    scalar_model = _ScalarModelWrapper(model)
-    
-    # If target_normals is not provided, compute numerically via the scalar SDF
     if target_normals is None:
         target_normals = compute_sdf_normals(
             scalar_model, points, embedding=embedding, method=normal_method
         )
-        # Use absolute SDF as target; normal direction from gradient
         pred_sdf_scalar = _scalar_wrapper(model, points, embedding)
-        target_vector = pred_sdf_scalar.abs() * target_normals
+        target_vector = pred_sdf_scalar * target_normals
     else:
         target_vector = target_sdf * target_normals
 
-    # L2 Vector Loss
     vector_l2_loss = nn.functional.mse_loss(pred_vector, target_vector)
 
-    # Cosine Similarity Loss (1 - cos_sim)
     pred_norm_vec = nn.functional.normalize(pred_vector, dim=-1, eps=1e-8)
     target_norm_vec = nn.functional.normalize(target_vector, dim=-1, eps=1e-8)
     cos_sim = nn.functional.cosine_similarity(pred_norm_vec, target_norm_vec, dim=-1)
     cosine_loss = torch.mean(1.0 - cos_sim)
 
-    # Magnitude MSE Loss (||pred_vector|| - |target_sdf|)^2
     pred_mag = pred_vector.norm(dim=-1, keepdim=True)
     target_mag = target_sdf.abs()
     magnitude_mse_loss = nn.functional.mse_loss(pred_mag, target_mag)
@@ -268,17 +266,17 @@ def compute_vector_sdf_loss(
         scalar_model, points, embedding=embedding, use_autograd=use_autograd_eikonal
     )
 
-    # Normal Cosine Loss (predicted normal vs target normal)
-    if w_normal > 0.0:
-        normal_loss = compute_normal_loss(
-            scalar_model,
-            points,
-            target_normals,
-            embedding=embedding,
-            method=normal_method,
+    normal_loss = torch.tensor(0.0, device=points.device, dtype=points.dtype)
+    consistency_loss = torch.tensor(0.0, device=points.device, dtype=points.dtype)
+    if w_normal > 0.0 or w_consistency > 0.0:
+        fd_normals = compute_sdf_normals(
+            scalar_model, points, embedding=embedding, method=normal_method
         )
-    else:
-        normal_loss = torch.tensor(0.0, device=points.device, dtype=points.dtype)
+        if w_normal > 0.0:
+            normal_loss = torch.mean(1.0 - nn.functional.cosine_similarity(fd_normals, target_normals, dim=-1))
+        if w_consistency > 0.0:
+            pred_dir = nn.functional.normalize(pred_vector, dim=-1, eps=1e-8)
+            consistency_loss = torch.mean(1.0 - nn.functional.cosine_similarity(pred_dir, fd_normals, dim=-1))
 
     total_loss = (
         w_vector_l2 * vector_l2_loss
@@ -286,6 +284,7 @@ def compute_vector_sdf_loss(
         + w_magnitude_mse * magnitude_mse_loss
         + w_eikonal * eikonal_loss
         + w_normal * normal_loss
+        + w_consistency * consistency_loss
     )
 
     return {
@@ -295,6 +294,7 @@ def compute_vector_sdf_loss(
         "magnitude_mse_loss": magnitude_mse_loss,
         "eikonal_loss": eikonal_loss,
         "normal_loss": normal_loss,
+        "consistency_loss": consistency_loss,
     }
 
 

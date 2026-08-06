@@ -1,20 +1,27 @@
+from __future__ import annotations
+
+from typing import Literal
+
 import torch
 from torch import nn
-from typing import Literal
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
-from sdfmodel.engine.metrics import compute_combined_sdf_loss, compute_vector_sdf_loss
+from sdfmodel.engine.metrics import (
+    ScalarModelWrapper,
+    compute_combined_sdf_loss,
+    compute_vector_sdf_loss,
+)
 from sdfmodel.models.base import BaseModel
-from sdfmodel.models.cross_attn_sdf import CrossAttnSDFModel
-from sdfmodel.models.vector_sdf import VectorSDFModel
 from sdfmodel.render import LiveSDFViewer, create_sdf3_wrapper
 
 
 class SceneTrainer:
     """Trainer for joint optimization of SDF models and scene object embeddings.
-    
-    Supports both CrossAttnSDFModel (scalar SDF output) and VectorSDFModel (3D vector field output).
+
+    Supports both CrossAttnSDFModel (scalar SDF output) and VectorSDFModel (3D
+    vector field output) with coarse-to-fine warmup, Fourier band annealing, and
+    per-term loss logging.
     """
 
     def __init__(
@@ -35,6 +42,13 @@ class SceneTrainer:
         w_vector_l2: float = 1.0,
         w_cosine: float = 0.5,
         w_magnitude_mse: float = 1.0,
+        w_consistency: float = 0.0,
+        vector_warmup_steps: int = 0,
+        total_steps: int | None = None,
+        fourier_bands_start: int | None = None,
+        fourier_bands_end: int | None = None,
+        fourier_anneal_fraction: float = 0.8,
+        log_every_steps: int = 0,
     ) -> None:
         self.model = model.to(device)
         self.learnable_embeddings = learnable_embeddings
@@ -43,6 +57,7 @@ class SceneTrainer:
         self.device = device
         self.model_type = model_type
         self.render_every_steps = render_every_steps
+
         self.w_distance = w_distance
         self.w_l1 = w_l1
         self.w_eikonal = w_eikonal
@@ -50,7 +65,19 @@ class SceneTrainer:
         self.w_vector_l2 = w_vector_l2
         self.w_cosine = w_cosine
         self.w_magnitude_mse = w_magnitude_mse
-        self.criterion = nn.MSELoss()
+        self.w_consistency = w_consistency
+        self.vector_warmup_steps = vector_warmup_steps
+        self.log_every_steps = log_every_steps
+
+        pe = getattr(model, "fourier_pe", None)
+        if pe is not None and fourier_bands_start is None:
+            fourier_bands_start = 4
+        self._fourier_bands_start = fourier_bands_start if fourier_bands_start is not None else 0
+        self._fourier_bands_end = fourier_bands_end
+        if pe is not None and fourier_bands_end is None:
+            self._fourier_bands_end = pe.num_bands
+        self._fourier_anneal_fraction = fourier_anneal_fraction
+        self._total_steps = total_steps
 
         view_mode: str | None = None
         if isinstance(view, str):
@@ -69,6 +96,72 @@ class SceneTrainer:
                 original_sdf=original_sdf,
             )
 
+    def _apply_fourier_anneal(self, step: int) -> None:
+        if self._total_steps is None or self._fourier_bands_start == 0:
+            return
+        if self._fourier_bands_end is None or self._fourier_bands_start >= self._fourier_bands_end:
+            return
+        pe = getattr(self.model, "fourier_pe", None)
+        if pe is None:
+            return
+        progress = min(1.0, (step + 1) / (self._total_steps * self._fourier_anneal_fraction))
+        active = self._fourier_bands_start + progress * (self._fourier_bands_end - self._fourier_bands_start)
+        pe.active_bands = active
+
+    def _compute_loss(
+        self,
+        step: int,
+        points: torch.Tensor,
+        target_sdf: torch.Tensor,
+        target_normals: torch.Tensor | None,
+        batch_embeddings: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        scalar_warmup = (
+            self.model_type == "vector_sdf"
+            and step < self.vector_warmup_steps
+        )
+
+        if scalar_warmup:
+            scalar_model = ScalarModelWrapper(self.model)
+            return compute_combined_sdf_loss(
+                model=scalar_model,
+                points=points,
+                target_sdf=target_sdf,
+                target_normals=target_normals,
+                embedding=batch_embeddings,
+                w_distance=self.w_distance,
+                w_l1=self.w_l1,
+                w_eikonal=self.w_eikonal,
+                w_normal=self.w_normal if target_normals is not None else 0.0,
+            )
+
+        if self.model_type == "vector_sdf":
+            return compute_vector_sdf_loss(
+                model=self.model,
+                points=points,
+                target_sdf=target_sdf,
+                target_normals=target_normals,
+                embedding=batch_embeddings,
+                w_vector_l2=self.w_vector_l2,
+                w_cosine=self.w_cosine,
+                w_magnitude_mse=self.w_magnitude_mse,
+                w_eikonal=self.w_eikonal,
+                w_normal=self.w_normal if target_normals is not None else 0.0,
+                w_consistency=self.w_consistency,
+            )
+
+        return compute_combined_sdf_loss(
+            model=self.model,
+            points=points,
+            target_sdf=target_sdf,
+            target_normals=target_normals,
+            embedding=batch_embeddings,
+            w_distance=self.w_distance,
+            w_l1=self.w_l1,
+            w_eikonal=self.w_eikonal,
+            w_normal=self.w_normal if target_normals is not None else 0.0,
+        )
+
     def train_step(
         self,
         step: int,
@@ -85,31 +178,11 @@ class SceneTrainer:
 
         batch_embeddings = self.learnable_embeddings.expand(batch_size, -1, -1)
 
-        if self.model_type == "vector_sdf":
-            loss_dict = compute_vector_sdf_loss(
-                model=self.model,
-                points=points,
-                target_sdf=target_sdf,
-                target_normals=target_normals,
-                embedding=batch_embeddings,
-                w_vector_l2=self.w_vector_l2,
-                w_cosine=self.w_cosine,
-                w_magnitude_mse=self.w_magnitude_mse,
-                w_eikonal=self.w_eikonal,
-                w_normal=self.w_normal if target_normals is not None else 0.0,
-            )
-        else:
-            loss_dict = compute_combined_sdf_loss(
-                model=self.model,
-                points=points,
-                target_sdf=target_sdf,
-                target_normals=target_normals,
-                embedding=batch_embeddings,
-                w_distance=self.w_distance,
-                w_l1=self.w_l1,
-                w_eikonal=self.w_eikonal,
-                w_normal=self.w_normal if target_normals is not None else 0.0,
-            )
+        self._apply_fourier_anneal(step)
+
+        loss_dict = self._compute_loss(
+            step, points, target_sdf, target_normals, batch_embeddings
+        )
 
         loss = loss_dict["loss"]
 
@@ -130,6 +203,18 @@ class SceneTrainer:
                 device=self.device,
             )
             self.viewer.update(sdf_obj, step=step, loss=loss_dict)
+
+        if (
+            self.log_every_steps > 0
+            and step % self.log_every_steps == 0
+        ):
+            parts = []
+            for k, v in loss_dict.items():
+                if k == "loss":
+                    continue
+                parts.append(f"{k}={float(v.detach()):.6f}")
+            if parts:
+                print(f"[step {step}] " + " | ".join(parts))
 
         return loss_val
 
