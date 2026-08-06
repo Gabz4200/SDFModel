@@ -15,7 +15,6 @@ def create_voxel_model(
     device: str = "cpu",
     grid_shape: tuple[int, int, int] | None = None,
     voxel_origin: tuple[float, float, float] | None = None,
-    voxel_size: float = 1.0,
     batch_size: int = 65536,
 ) -> Model:
     """Wrap a voxel prediction model into a voxelmap Model for rendering and export.
@@ -59,7 +58,9 @@ def create_voxel_model(
     pred = pred.reshape(grid_shape[0], grid_shape[1], grid_shape[2], 4)
     pred = np.clip(pred, 0.0, 1.0).astype(np.float32)
 
-    vm = Model(array=pred)
+    # voxelmap expects a 3D occupancy array (Z, X, Y)
+    voxel_array = (pred[..., 0] > 0.5).astype(np.float32)
+    vm = Model(array=voxel_array)
     vm.objfile = "voxel_scene.obj"
     return vm
 
