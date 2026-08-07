@@ -35,7 +35,11 @@ def create_voxel_model(
     if grid_shape is None:
         grid_shape = (32, 32, 32)
     if voxel_origin is None:
-        voxel_origin = (-grid_shape[0] / 2.0, -grid_shape[1] / 2.0, -grid_shape[2] / 2.0)
+        voxel_origin = (
+            -grid_shape[0] / 2.0,
+            -grid_shape[1] / 2.0,
+            -grid_shape[2] / 2.0,
+        )
 
     zz, yy, xx = np.mgrid[
         0 : grid_shape[0],
@@ -49,7 +53,9 @@ def create_voxel_model(
     with torch.no_grad():
         for i in range(0, n_points, batch_size):
             batch_coords = coords[i : i + batch_size]
-            cords_t = torch.from_numpy(batch_coords).to(device=device, dtype=torch.float32)
+            cords_t = torch.from_numpy(batch_coords).to(
+                device=device, dtype=torch.float32
+            )
             out = model(cords_t, embedding)
             out = torch.sigmoid(out)
             pred_chunks.append(out.cpu().numpy())

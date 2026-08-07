@@ -78,9 +78,7 @@ class VectorSDFModel(CrossAttnSDFModel):
         dist = self.dist_head(feats)
         if self.use_tanh:
             dist = torch.tanh(dist)
-        direction = nn.functional.normalize(
-            self.vector_head(feats), dim=-1, eps=1e-8
-        )
+        direction = nn.functional.normalize(self.vector_head(feats), dim=-1, eps=1e-8)
         vector = direction * dist
 
         original_cords_ndim = cords.ndim

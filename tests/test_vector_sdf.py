@@ -87,13 +87,13 @@ def test_vector_sdf_chunked_forward() -> None:
 
     # Large batch
     cords = torch.randn(100, 3)
-    
+
     # Without chunking
     out_unchunked = model(cords, embedding, chunk_size=None)
-    
+
     # With chunking
     out_chunked = model(cords, embedding, chunk_size=25)
-    
+
     assert torch.allclose(out_unchunked, out_chunked, atol=1e-5)
 
 

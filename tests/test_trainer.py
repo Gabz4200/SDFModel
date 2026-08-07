@@ -159,4 +159,3 @@ def test_compute_combined_sdf_loss() -> None:
     total_loss.backward()
     param = next(model.parameters())
     assert param.grad is not None
-

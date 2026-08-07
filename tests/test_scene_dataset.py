@@ -1,5 +1,3 @@
-from typing import Any, cast
-
 import numpy as np
 import sdf
 import torch
@@ -106,7 +104,9 @@ def test_scene_4_primitives_chaos_game_sampling() -> None:
     f = dataset.scene(near_points).squeeze(-1)
 
     frac_in_band = float(np.mean(np.abs(f) < eps))
-    assert frac_in_band > 0.95, f"Only {frac_in_band:.2f} of chaos points in surface band"
+    assert frac_in_band > 0.95, (
+        f"Only {frac_in_band:.2f} of chaos points in surface band"
+    )
 
     # Exploration: points must not collapse onto a single surface location
     spread = float(np.std(near_points, axis=0).mean())
@@ -131,8 +131,7 @@ def test_scene_4_primitives_chaos_game_covers_torus_rim() -> None:
     near_points = dataset.points_data[0, :n_near, :]
 
     # Rebuild the torus component (center (-0.4, 0.4, 0), ring r=0.25, tube R=0.08)
-    sdf_api = cast(Any, sdf)
-    torus = sdf_api.torus(0.25, 0.08).translate((-0.4, 0.4, 0.0))
+    torus = sdf.torus(0.25, 0.08).translate((-0.4, 0.4, 0.0))
     f_torus = torus(near_points).squeeze(-1)
     on_torus = np.abs(f_torus) < 0.01
 
@@ -141,7 +140,9 @@ def test_scene_4_primitives_chaos_game_covers_torus_rim() -> None:
     dist_axis = np.sqrt((near_points[:, 0] + 0.4) ** 2 + (near_points[:, 1] - 0.4) ** 2)
     rim_hits = int(np.sum(on_torus & (dist_axis < 0.24)))
 
-    assert rim_hits > 10, f"Chaos game found only {rim_hits} points on the torus rim interior"
+    assert rim_hits > 10, (
+        f"Chaos game found only {rim_hits} points on the torus rim interior"
+    )
 
 
 def test_scene_dataloader_sampler_param() -> None:
@@ -160,4 +161,3 @@ def test_scene_dataloader_sampler_param() -> None:
 
     with pytest.raises(ValueError):
         Scene4PrimitivesDataset(num_samples=1, points_per_item=16, sampler="bogus")
-

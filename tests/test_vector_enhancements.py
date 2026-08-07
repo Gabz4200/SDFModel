@@ -23,7 +23,9 @@ def test_vector_sdf_direction_head_gets_gradient() -> None:
     target_dir = torch.randn(10, 3)
     target_dir = target_dir / target_dir.norm(dim=-1, keepdim=True)
     pred_dir = output / output.norm(dim=-1, keepdim=True).clamp_min(1e-8)
-    loss = torch.mean(1.0 - torch.nn.functional.cosine_similarity(pred_dir, target_dir, dim=-1))
+    loss = torch.mean(
+        1.0 - torch.nn.functional.cosine_similarity(pred_dir, target_dir, dim=-1)
+    )
 
     loss.backward()
 
@@ -101,8 +103,12 @@ def test_fourier_pe_active_bands_masking() -> None:
     for coord in range(c):
         base = coord * b
         # Kept bands (0, 1) equal full output
-        assert torch.allclose(msin_block[..., base : base + 2], sin_block[..., base : base + 2])
-        assert torch.allclose(mcos_block[..., base : base + 2], cos_block[..., base : base + 2])
+        assert torch.allclose(
+            msin_block[..., base : base + 2], sin_block[..., base : base + 2]
+        )
+        assert torch.allclose(
+            mcos_block[..., base : base + 2], cos_block[..., base : base + 2]
+        )
         # Zeroed bands (2..7) are exactly zero
         assert torch.all(msin_block[..., base + 2 : base + b] == 0.0)
         assert torch.all(mcos_block[..., base + 2 : base + b] == 0.0)

@@ -6,8 +6,8 @@ import torch
 from torch import nn
 
 from sdfmodel.models.base import BaseModel
-from sdfmodel.models.transformer_block import CrossAttentionTransformerBlock
 from sdfmodel.models.fourier_pe import FourierPositionEncoding
+from sdfmodel.models.transformer_block import CrossAttentionTransformerBlock
 
 
 class BaseSceneModel(BaseModel):
@@ -132,7 +132,9 @@ class BaseSceneModel(BaseModel):
         obj_embed = embedding
         if self.use_scene_token:
             B = obj_embed.shape[0]
-            obj_embed = torch.cat([self.scene_token.expand(B, -1, -1), obj_embed], dim=1)
+            obj_embed = torch.cat(
+                [self.scene_token.expand(B, -1, -1), obj_embed], dim=1
+            )
 
         fourier_feats = self.fourier_pe(cords)
         cords_embed = self.cords_mlp(fourier_feats)

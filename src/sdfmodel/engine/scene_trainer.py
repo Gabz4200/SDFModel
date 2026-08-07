@@ -72,7 +72,9 @@ class SceneTrainer:
         pe = getattr(model, "fourier_pe", None)
         if pe is not None and fourier_bands_start is None:
             fourier_bands_start = 4
-        self._fourier_bands_start = fourier_bands_start if fourier_bands_start is not None else 0
+        self._fourier_bands_start = (
+            fourier_bands_start if fourier_bands_start is not None else 0
+        )
         self._fourier_bands_end = fourier_bands_end
         if pe is not None and fourier_bands_end is None:
             self._fourier_bands_end = pe.num_bands
@@ -99,13 +101,20 @@ class SceneTrainer:
     def _apply_fourier_anneal(self, step: int) -> None:
         if self._total_steps is None or self._fourier_bands_start == 0:
             return
-        if self._fourier_bands_end is None or self._fourier_bands_start >= self._fourier_bands_end:
+        if (
+            self._fourier_bands_end is None
+            or self._fourier_bands_start >= self._fourier_bands_end
+        ):
             return
         pe = getattr(self.model, "fourier_pe", None)
         if pe is None:
             return
-        progress = min(1.0, (step + 1) / (self._total_steps * self._fourier_anneal_fraction))
-        active = self._fourier_bands_start + progress * (self._fourier_bands_end - self._fourier_bands_start)
+        progress = min(
+            1.0, (step + 1) / (self._total_steps * self._fourier_anneal_fraction)
+        )
+        active = self._fourier_bands_start + progress * (
+            self._fourier_bands_end - self._fourier_bands_start
+        )
         pe.active_bands = active
 
     def _compute_loss(
@@ -117,8 +126,7 @@ class SceneTrainer:
         batch_embeddings: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
         scalar_warmup = (
-            self.model_type == "vector_sdf"
-            and step < self.vector_warmup_steps
+            self.model_type == "vector_sdf" and step < self.vector_warmup_steps
         )
 
         if scalar_warmup:
@@ -204,10 +212,7 @@ class SceneTrainer:
             )
             self.viewer.update(sdf_obj, step=step, loss=loss_dict)
 
-        if (
-            self.log_every_steps > 0
-            and step % self.log_every_steps == 0
-        ):
+        if self.log_every_steps > 0 and step % self.log_every_steps == 0:
             parts = []
             for k, v in loss_dict.items():
                 if k == "loss":
@@ -228,11 +233,9 @@ class SceneTrainer:
                 self.dataloader, start=1
             ):
                 target_normals = rest[0] if rest else None
-                epoch_loss += self.train_step(
-                    step, points, target_sdf, target_normals
-                )
+                epoch_loss += self.train_step(step, points, target_sdf, target_normals)
             avg = epoch_loss / max(len(self.dataloader), 1)
-            print(f"Epoch {epoch+1}/{epochs} - Loss: {avg:.6f}")
+            print(f"Epoch {epoch + 1}/{epochs} - Loss: {avg:.6f}")
             epoch_losses.append(avg)
 
         self.close(keep_open=True)

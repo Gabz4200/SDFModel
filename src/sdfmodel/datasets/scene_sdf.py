@@ -1,5 +1,3 @@
-from typing import Any, cast
-
 import numpy as np
 import sdf
 import torch
@@ -8,11 +6,10 @@ from torch.utils.data import DataLoader, Dataset
 
 def create_4_primitives_scene() -> sdf.d3.SDF3:
     """Create a 3D scene containing 4 primitives: sphere, box, torus, capped_cylinder."""
-    sdf_api = cast(Any, sdf)
-    s1 = sdf_api.sphere(0.35).translate((-0.4, -0.4, 0.0))
-    s2 = sdf_api.box((0.3, 0.3, 0.3)).translate((0.4, -0.4, 0.0))
-    s3 = sdf_api.torus(0.25, 0.08).translate((-0.4, 0.4, 0.0))
-    s4 = sdf_api.capped_cylinder(-sdf.Z * 0.25, sdf.Z * 0.25, 0.2).translate(
+    s1 = sdf.sphere(0.35).translate((-0.4, -0.4, 0.0))
+    s2 = sdf.box((0.3, 0.3, 0.3)).translate((0.4, -0.4, 0.0))
+    s3 = sdf.torus(0.25, 0.08).translate((-0.4, 0.4, 0.0))
+    s4 = sdf.capped_cylinder(-sdf.Z * 0.25, sdf.Z * 0.25, 0.2).translate(
         (0.4, 0.4, 0.0)
     )
 
@@ -36,7 +33,9 @@ class Scene4PrimitivesDataset(Dataset):
     ) -> None:
         super().__init__()
         if sampler not in ("chaos_game", "rejection"):
-            raise ValueError(f"Unknown sampler '{sampler}' (expected 'chaos_game' or 'rejection')")
+            raise ValueError(
+                f"Unknown sampler '{sampler}' (expected 'chaos_game' or 'rejection')"
+            )
         self.num_samples = num_samples
         self.points_per_item = points_per_item
         self.return_normals = return_normals
@@ -118,22 +117,21 @@ class Scene4PrimitivesDataset(Dataset):
         for _ in range(self.chaos_iters):
             f = self.scene(pts).squeeze(-1)
             normals = self._scene_normals(pts)
-            pts = pts - f[:, None] * normals  # project onto the zero level set
-            pts = pts + rng.normal(
-                0.0, self.chaos_jitter, size=pts.shape
-            ).astype(np.float32)
-        # Final exact projection, then spread inside the surface band
+            pts = pts - f[:, None] * normals
+            pts = pts + rng.normal(0.0, self.chaos_jitter, size=pts.shape).astype(
+                np.float32
+            )
         f = self.scene(pts).squeeze(-1)
         normals = self._scene_normals(pts)
         pts = pts - f[:, None] * normals
-        pts = pts + rng.normal(0.0, self.surface_eps / 3.0, size=pts.shape).astype(
-            np.float32
-        ) * normals
+        pts = (
+            pts
+            + rng.normal(0.0, self.surface_eps / 3.0, size=pts.shape).astype(np.float32)
+            * normals
+        )
         return pts
 
-    def _sample_near_surface(
-        self, n: int, rng: np.random.Generator
-    ) -> np.ndarray:
+    def _sample_near_surface(self, n: int, rng: np.random.Generator) -> np.ndarray:
         """Rejection-sample points within ``surface_eps`` of the analytic zero level set."""
         if n == 0:
             return np.empty((0, 3), dtype=np.float32)
@@ -153,7 +151,11 @@ class Scene4PrimitivesDataset(Dataset):
                 take = min(len(accepted), remaining)
                 collected.append(accepted[:take])
                 remaining -= take
-        pts = np.concatenate(collected) if collected else np.empty((0, 3), dtype=np.float32)
+        pts = (
+            np.concatenate(collected)
+            if collected
+            else np.empty((0, 3), dtype=np.float32)
+        )
         if pts.shape[0] < n:
             center_indices = rng.integers(0, 4, size=n - pts.shape[0])
             extra = self.primitive_centers[center_indices] + rng.normal(

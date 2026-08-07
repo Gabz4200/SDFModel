@@ -43,7 +43,9 @@ class VoxelSceneDataset(Dataset):
             0 : self.grid_shape[1],
             0 : self.grid_shape[2],
         ]
-        self._all_coords = np.stack([xx, yy, zz], axis=-1).reshape(-1, 3).astype(np.int32)
+        self._all_coords = (
+            np.stack([xx, yy, zz], axis=-1).reshape(-1, 3).astype(np.int32)
+        )
         self._all_occ = self.occ_mask.reshape(-1)
         self._all_colors = self.color_grid.reshape(-1, 3)
         occ_idx = np.flatnonzero(self._all_occ)
@@ -57,10 +59,13 @@ class VoxelSceneDataset(Dataset):
     @property
     def voxel_array_4d(self) -> np.ndarray:
         out = np.zeros((*self.grid_shape, 4), dtype=np.float32)
-        out[self.occ_mask] = np.concatenate([
-            np.ones((self.occ_mask.sum(), 1), dtype=np.float32),
-            self.color_grid[self.occ_mask],
-        ], axis=1)
+        out[self.occ_mask] = np.concatenate(
+            [
+                np.ones((self.occ_mask.sum(), 1), dtype=np.float32),
+                self.color_grid[self.occ_mask],
+            ],
+            axis=1,
+        )
         return out
 
     def _sample_items(self, seed: int) -> None:
@@ -75,7 +80,10 @@ class VoxelSceneDataset(Dataset):
                 occ_coords = self._occ_coords[occ_idx]
                 occ_colors = self._occ_colors[occ_idx]
                 occ_targets = np.concatenate(
-                    [np.ones((n_occ, 1), dtype=np.float32), occ_colors.astype(np.float32)],
+                    [
+                        np.ones((n_occ, 1), dtype=np.float32),
+                        occ_colors.astype(np.float32),
+                    ],
                     axis=1,
                 )
             else:
@@ -146,7 +154,9 @@ def _load_voxel_grid(voxel_path: str | Path) -> tuple[np.ndarray, float, np.ndar
                 palette.append((r, g, b, a))
         elif chunk_type == b"MAIN":
             if size is None or not voxels:
-                children_data = data[offset + 12 + chunk_size : offset + 12 + chunk_size + children_size]
+                children_data = data[
+                    offset + 12 + chunk_size : offset + 12 + chunk_size + children_size
+                ]
                 child_size, child_voxels, child_palette = _parse_children(children_data)
                 if size is None:
                     size = child_size
@@ -164,7 +174,11 @@ def _load_voxel_grid(voxel_path: str | Path) -> tuple[np.ndarray, float, np.ndar
 
     for vx, vy, vz, ci in voxels:
         if ci > 0:
-            color = palette[ci - 1] if palette and ci - 1 < len(palette) else default_palette[ci - 1]
+            color = (
+                palette[ci - 1]
+                if palette and ci - 1 < len(palette)
+                else default_palette[ci - 1]
+            )
             r, g, b, _ = color
             grid[vz, vy, vx, 0] = 1.0
             grid[vz, vy, vx, 1] = r / 255.0

@@ -25,14 +25,28 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Train SDF Model & Learnable Embeddings on 3D Scene"
     )
-    parser.add_argument("--epochs", type=int, default=10, help="Number of training epochs")
-    parser.add_argument("--batch-size", type=int, default=2, help="Batch size (default 2 for CPU)")
+    parser.add_argument(
+        "--epochs", type=int, default=10, help="Number of training epochs"
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=2, help="Batch size (default 2 for CPU)"
+    )
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--hidden-dim", type=int, default=64, help="Model hidden dimension")
-    parser.add_argument("--num-layers", type=int, default=4, help="Number of transformer layers")
-    parser.add_argument("--num-samples", type=int, default=512, help="Dataset sample count")
-    parser.add_argument("--points-per-item", type=int, default=256, help="Points per item sample")
-    parser.add_argument("--num-tokens", type=int, default=8, help="Learnable object token count")
+    parser.add_argument(
+        "--hidden-dim", type=int, default=64, help="Model hidden dimension"
+    )
+    parser.add_argument(
+        "--num-layers", type=int, default=4, help="Number of transformer layers"
+    )
+    parser.add_argument(
+        "--num-samples", type=int, default=512, help="Dataset sample count"
+    )
+    parser.add_argument(
+        "--points-per-item", type=int, default=256, help="Points per item sample"
+    )
+    parser.add_argument(
+        "--num-tokens", type=int, default=8, help="Learnable object token count"
+    )
     parser.add_argument(
         "--fourier-bands",
         type=int,
@@ -59,11 +73,24 @@ def main() -> int:
         choices=["2d", "3d"],
         help="Open live window showing SDF reconstruction",
     )
-    parser.add_argument("--render-every-steps", type=int, default=5, help="Render update frequency")
-    parser.add_argument("--render-resolution", type=int, default=128, help="Live render slice resolution")
-    parser.add_argument("--device", type=str, default="auto", help="Device (cpu, cuda, auto)")
-    parser.add_argument("--save-checkpoint", type=str, default=None, help="Checkpoint path (.pt)")
-    parser.add_argument("--save-mesh", type=str, default=None, help="Export mesh path (.stl/.obj)")
+    parser.add_argument(
+        "--render-every-steps", type=int, default=5, help="Render update frequency"
+    )
+    parser.add_argument(
+        "--render-resolution",
+        type=int,
+        default=128,
+        help="Live render slice resolution",
+    )
+    parser.add_argument(
+        "--device", type=str, default="auto", help="Device (cpu, cuda, auto)"
+    )
+    parser.add_argument(
+        "--save-checkpoint", type=str, default=None, help="Checkpoint path (.pt)"
+    )
+    parser.add_argument(
+        "--save-mesh", type=str, default=None, help="Export mesh path (.stl/.obj)"
+    )
     args = parser.parse_args()
 
     device = (
@@ -98,7 +125,9 @@ def main() -> int:
         ).to(device)
 
     hidden_dim = args.hidden_dim
-    embeddings = torch.nn.Parameter(torch.randn(args.num_tokens, hidden_dim, device=device))
+    embeddings = torch.nn.Parameter(
+        torch.randn(args.num_tokens, hidden_dim, device=device)
+    )
     optimizer = torch.optim.Adam(list(model.parameters()) + [embeddings], lr=args.lr)
 
     voxel_dataset = None
@@ -119,8 +148,12 @@ def main() -> int:
 
     total_steps = len(dataloader) * args.epochs
 
-    print(f"Model parameters: {model.num_parameters:,} (trainable: {model.trainable_parameters:,})")
-    print(f"Starting training on '{device}' for {args.epochs} epochs ({total_steps} steps)...")
+    print(
+        f"Model parameters: {model.num_parameters:,} (trainable: {model.trainable_parameters:,})"
+    )
+    print(
+        f"Starting training on '{device}' for {args.epochs} epochs ({total_steps} steps)..."
+    )
 
     if args.model_type == "voxel":
         bce = torch.nn.BCELoss()
@@ -146,10 +179,7 @@ def main() -> int:
                 optimizer.step()
                 epoch_loss += loss.item()
 
-                if (
-                    args.view in ("2d", "3d")
-                    and step % render_every == 0
-                ):
+                if args.view in ("2d", "3d") and step % render_every == 0:
                     vm = create_voxel_model(
                         model,
                         embedding=embeddings,
@@ -163,7 +193,9 @@ def main() -> int:
                     original_voxels = voxel_dataset.voxel_array[..., 0] > 0.5
                     original_rgb = voxel_dataset.voxel_array[..., 1:]
                     recon_voxels = vm.build()
-                    recon_rgb = vm.__dict__.get("_rgb", np.zeros((*recon_voxels.shape, 3)))
+                    recon_rgb = vm.__dict__.get(
+                        "_rgb", np.zeros((*recon_voxels.shape, 3))
+                    )
 
                     if args.view == "2d":
                         fig, (ax0, ax1) = plt.subplots(1, 2, figsize=(10, 5))
@@ -206,7 +238,7 @@ def main() -> int:
                                 edgecolors="gray",
                                 linewidth=0.3,
                             )
-                            ax.set_title(f"{title} - Epoch {epoch+1} Step {step}")
+                            ax.set_title(f"{title} - Epoch {epoch + 1} Step {step}")
                             ax.set_box_aspect(1.0)  # type: ignore[arg-type]
                             ax.set_xlabel("X")
                             ax.set_ylabel("Y")
@@ -216,7 +248,9 @@ def main() -> int:
                     fig.canvas.flush_events()
                     plt.pause(0.01)
 
-            print(f"Epoch {epoch+1}/{args.epochs} - Loss: {epoch_loss/len(dataloader):.6f}")
+            print(
+                f"Epoch {epoch + 1}/{args.epochs} - Loss: {epoch_loss / len(dataloader):.6f}"
+            )
         if voxel_viewer is not None:
             plt.ioff()
             plt.show()
@@ -230,7 +264,7 @@ def main() -> int:
             view=args.view,
             render_every_steps=args.render_every_steps,
             render_resolution=args.render_resolution,
-            model_type="scalar_sdf" if args.model_type == "scalar_sdf" else "vector_sdf",
+            model_type=args.model_type,
             total_steps=total_steps,
             vector_warmup_steps=0,
             log_every_steps=10,

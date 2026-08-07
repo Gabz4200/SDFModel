@@ -12,7 +12,7 @@
 
 During training on multi-primitive 3D scenes (containing spheres, boxes, tori, and cylinders), `SceneTrainer` streams live 3D Marching Cubes isosurface reconstructions in real time.
 
-### 🖼️ Live Training Progress & Reconstructions
+### Live Training Progress & Reconstructions
 
 #### 1. Initial Surface Formation (Step 1055 — MSE Loss: 0.000976)
 Primitive boundaries (sphere, box, torus, capped cylinder) emerge from uniform and near-surface point sampling:
@@ -59,7 +59,7 @@ Coarse-to-fine Fourier band annealing + chaos-game surface sampling vs. uniform 
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 ### Models
 
@@ -178,7 +178,7 @@ SDFModel/
 
 ---
 
-## ⚙️ Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 - Python ≥3.11, <3.14
@@ -204,7 +204,7 @@ pip install -e .
 
 ---
 
-## 🚀 Quick Start & Usage
+## Quick Start & Usage
 
 ### 1. Scene Reconstruction Training
 

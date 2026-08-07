@@ -39,7 +39,9 @@ class ScalarModelWrapper(nn.Module):
         super().__init__()
         self.m = m
 
-    def forward(self, pts: torch.Tensor, emb: torch.Tensor | None = None) -> torch.Tensor:
+    def forward(
+        self, pts: torch.Tensor, emb: torch.Tensor | None = None
+    ) -> torch.Tensor:
         return _scalar_wrapper(self.m, pts, emb)
 
 
@@ -273,10 +275,15 @@ def compute_vector_sdf_loss(
             scalar_model, points, embedding=embedding, method=normal_method
         )
         if w_normal > 0.0:
-            normal_loss = torch.mean(1.0 - nn.functional.cosine_similarity(fd_normals, target_normals, dim=-1))
+            normal_loss = torch.mean(
+                1.0
+                - nn.functional.cosine_similarity(fd_normals, target_normals, dim=-1)
+            )
         if w_consistency > 0.0:
             pred_dir = nn.functional.normalize(pred_vector, dim=-1, eps=1e-8)
-            consistency_loss = torch.mean(1.0 - nn.functional.cosine_similarity(pred_dir, fd_normals, dim=-1))
+            consistency_loss = torch.mean(
+                1.0 - nn.functional.cosine_similarity(pred_dir, fd_normals, dim=-1)
+            )
 
     total_loss = (
         w_vector_l2 * vector_l2_loss

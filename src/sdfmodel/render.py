@@ -195,7 +195,10 @@ def render_sdf_3d(
 
 def _is_interactive_gui() -> bool:
     backend = plt.get_backend().lower()
-    return backend not in ("agg", "svg", "pdf", "ps", "template") and matplotlib.is_interactive()
+    return (
+        backend not in ("agg", "svg", "pdf", "ps", "template")
+        and matplotlib.is_interactive()
+    )
 
 
 class LiveSDFViewer:
@@ -252,7 +255,6 @@ class LiveSDFViewer:
             self.ax_recon.sharey(self.ax_orig)
             self.ax_recon.sharez(self.ax_orig)
 
-            # Render original scene 3D isosurface mesh ONCE
             orig_pts = sdf.core.generate(
                 self.original_sdf,
                 step=self.step,
@@ -365,7 +367,7 @@ class LiveSDFViewer:
                 sub_parts.append(f"Consist: {v:.4f}")
 
             if sub_parts:
-                parts.append(f"({ ' | '.join(sub_parts) })")
+                parts.append(f"({' | '.join(sub_parts)})")
             loss_str = " ".join(parts)
         else:
             loss_str = f"Loss: {loss}"
@@ -409,9 +411,7 @@ class LiveSDFViewer:
                 self.mesh_collection.set_facecolor([0.2, 0.6, 1.0])
                 self.ax_recon.add_collection3d(self.mesh_collection)
 
-            self.ax_recon.set_title(
-                f"Reconstruction (Step {step})\n{loss_str}"
-            )
+            self.ax_recon.set_title(f"Reconstruction (Step {step})\n{loss_str}")
         else:
             x_val = self.slice_pos if self.slice_axis == "x" else None
             y_val = self.slice_pos if self.slice_axis == "y" else None
@@ -441,9 +441,7 @@ class LiveSDFViewer:
                 self.im.set_data(grid)
                 self.im.set_clim(vmin=grid.min(), vmax=grid.max())
 
-            self.ax_recon.set_title(
-                f"Reconstruction (Step {step})\n{loss_str}"
-            )
+            self.ax_recon.set_title(f"Reconstruction (Step {step})\n{loss_str}")
 
         self.fig.canvas.draw_idle()
         with contextlib.suppress(AttributeError, RuntimeError):
@@ -637,7 +635,9 @@ def export_interpolation_frames(
         for i in range(num_objs):
             target_idx = (i + 1) % num_objs
             alpha = 0.5 * (1.0 - math.cos(t * math.pi * 2.0))
-            curr_emb[0, i] = (1.0 - alpha) * base_emb[0, i] + alpha * base_emb[0, target_idx]
+            curr_emb[0, i] = (1.0 - alpha) * base_emb[0, i] + alpha * base_emb[
+                0, target_idx
+            ]
 
         sdf_obj = create_sdf3_wrapper(model, embedding=curr_emb, device=device)
 

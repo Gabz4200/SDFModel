@@ -113,6 +113,7 @@ def test_live_sdf_viewer_side_by_side_and_synced_view() -> None:
 
 def test_live_sdf_viewer_custom_original_sdf() -> None:
     import sdf
+
     custom_orig = sdf.sphere(0.5)
     model = SDFMLP(in_features=3, hidden_features=32, num_layers=2)
     sdf_obj = create_sdf3_wrapper(model)
@@ -143,7 +144,6 @@ def test_live_sdf_viewer_loss_dict_display() -> None:
     assert "Eikonal: 0.0050" in title_text
     assert "Normal: 0.0280" in title_text
     viewer.close(keep_open=False)
-
 
 
 def test_render_interactive_interpolation() -> None:

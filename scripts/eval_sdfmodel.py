@@ -104,7 +104,10 @@ def main() -> int:
         )
         seq_len = checkpoint.get("num_tokens", 4)
         embedding = CrossAttnSDFModel.create_learnable_embedding(
-            batch_size=1, seq_len=seq_len, hidden_dim=hidden_dim, device=torch.device(device)
+            batch_size=1,
+            seq_len=seq_len,
+            hidden_dim=hidden_dim,
+            device=torch.device(device),
         )
 
     print(

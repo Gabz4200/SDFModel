@@ -1,7 +1,6 @@
 import argparse
 import sys
 
-
 import torch
 
 from sdfmodel.datasets import build_dataloaders, build_scene_dataloader
@@ -92,7 +91,9 @@ def run_render(args: argparse.Namespace) -> int:
     checkpoint = None
     if args.checkpoint:
         print(f"Loading weights from '{args.checkpoint}'...")
-        checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
+        checkpoint = torch.load(
+            args.checkpoint, map_location=device, weights_only=False
+        )
         if isinstance(model, (CrossAttnSDFModel, VectorSDFModel)):
             # Checkpoint architecture flags are authoritative: rebuild when any
             # of them differs from the CLI args (band count, layers, hidden dim,
@@ -376,7 +377,10 @@ def run_eval_sdfmodel(args: argparse.Namespace) -> int:
         )
         seq_len = checkpoint.get("num_tokens", 4)
         embedding = CrossAttnSDFModel.create_learnable_embedding(
-            batch_size=1, seq_len=seq_len, hidden_dim=hidden_dim, device=torch.device(device)
+            batch_size=1,
+            seq_len=seq_len,
+            hidden_dim=hidden_dim,
+            device=torch.device(device),
         )
 
     print(
@@ -414,7 +418,6 @@ def main() -> int:
     # Info command
     subparsers.add_parser("info", help="Display environment and model info")
 
-    # Render command
     render_parser = subparsers.add_parser(
         "render", help="Render SDF model slice or 3D mesh using fogleman/sdf"
     )
@@ -665,6 +668,12 @@ def main() -> int:
 
     args = parser.parse_args()
 
+    dispatch: dict[str, Callable[[], int]] = {
+        "info": run_info,
+        "render": lambda: run_render(args),
+        "train-scene": lambda: run_train_scene(args),
+        "eval-sdfmodel": lambda: run_eval_sdfmodel(args),
+    }
     if args.command == "train":
         cfg = ExperimentConfig()
         cfg.training.epochs = args.epochs
@@ -673,17 +682,11 @@ def main() -> int:
         cfg.training.seed = args.seed
         cfg.training.device = args.device
         return run_train(cfg)
-    elif args.command == "info":
-        return run_info()
-    elif args.command == "render":
-        return run_render(args)
-    elif args.command == "train-scene":
-        return run_train_scene(args)
-    elif args.command == "eval-sdfmodel":
-        return run_eval_sdfmodel(args)
-    else:
-        cfg = ExperimentConfig()
-        return run_train(cfg)
+    handler = dispatch.get(args.command)
+    if handler is not None:
+        return handler()
+    cfg = ExperimentConfig()
+    return run_train(cfg)
 
 
 if __name__ == "__main__":

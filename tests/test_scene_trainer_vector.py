@@ -17,7 +17,10 @@ def test_scene_trainer_vector_model_step() -> None:
     optimizer = torch.optim.Adam(list(model.parameters()) + [embeddings], lr=0.01)
 
     loader = build_scene_dataloader(
-        num_samples=16, points_per_item=128, batch_size=2, seed=42,
+        num_samples=16,
+        points_per_item=128,
+        batch_size=2,
+        seed=42,
         return_normals=True,
     )
 
@@ -40,7 +43,9 @@ def test_scene_trainer_vector_model_step() -> None:
         points = batch[0]
         targets = batch[1]
         target_normals = batch[2] if len(batch) > 2 else None
-        final_loss = trainer.train_step(0, points, targets, target_normals=target_normals)
+        final_loss = trainer.train_step(
+            0, points, targets, target_normals=target_normals
+        )
 
     assert final_loss <= initial_loss or final_loss >= 0.0
 
@@ -56,7 +61,10 @@ def test_scene_trainer_vector_model_loss_decrease() -> None:
     optimizer = torch.optim.Adam(list(model.parameters()) + [embeddings], lr=0.01)
 
     loader = build_scene_dataloader(
-        num_samples=32, points_per_item=64, batch_size=2, seed=42,
+        num_samples=32,
+        points_per_item=64,
+        batch_size=2,
+        seed=42,
         return_normals=True,
     )
 
@@ -75,7 +83,9 @@ def test_scene_trainer_vector_model_loss_decrease() -> None:
         points = batch[0]
         targets = batch[1]
         target_normals = batch[2] if len(batch) > 2 else None
-        loss_val = trainer.train_step(step, points, targets, target_normals=target_normals)
+        loss_val = trainer.train_step(
+            step, points, targets, target_normals=target_normals
+        )
         losses.append(loss_val)
 
     assert len(losses) > 1
@@ -94,7 +104,10 @@ def test_scene_trainer_scalar_model_still_works() -> None:
     optimizer = torch.optim.Adam(list(model.parameters()) + [embeddings], lr=0.01)
 
     loader = build_scene_dataloader(
-        num_samples=16, points_per_item=128, batch_size=2, seed=42,
+        num_samples=16,
+        points_per_item=128,
+        batch_size=2,
+        seed=42,
         return_normals=True,
     )
 
