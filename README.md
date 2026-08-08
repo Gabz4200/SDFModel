@@ -1,6 +1,6 @@
 # SDFModel
 
-**SDFModel** is a PyTorch research framework for learning, evaluating, and visualizing **Implicit Neural Representations (INR)** and **Signed Distance Fields (SDF)**. It integrates spatial Fourier feature embeddings, transformer cross-attention mechanisms over scene object tokens, and seamless integration with the `fogleman/sdf` engine for fast 2D slice sampling, 3D Marching Cubes isosurface mesh generation, live interactive training visualizations, and 3D STL/OBJ mesh exports.
+SDFModel is a PyTorch research framework for learning, evaluating, and visualizing implicit neural representations (INR) and signed distance fields (SDF). It combines spatial Fourier feature embeddings, transformer cross-attention over scene object tokens, and integration with the `fogleman/sdf` engine for 2D slice sampling, 3D Marching Cubes isosurface generation, live interactive training visualization, and STL/OBJ mesh export.
 
 <p align="center">
   <img src="results/print_from_training_process_final_result_reconstruction.png" alt="Final 3D Scene Reconstruction" width="900" />
@@ -8,14 +8,14 @@
 
 ---
 
-## 🌟 Training Visualization & Live 3D Scene Reconstruction
+## Training Visualization & Live 3D Scene Reconstruction
 
-During training on multi-primitive 3D scenes (containing spheres, boxes, tori, and cylinders), `SceneTrainer` streams live 3D Marching Cubes isosurface reconstructions in real time.
+During training on multi-primitive 3D scenes containing spheres, boxes, tori, and cylinders, `SceneTrainer` streams live Marching Cubes reconstructions.
 
 ### Live Training Progress & Reconstructions
 
 #### 1. Initial Surface Formation (Step 1055 — MSE Loss: 0.000976)
-Primitive boundaries (sphere, box, torus, capped cylinder) emerge from uniform and near-surface point sampling:
+Primitive boundaries emerge from uniform and near-surface point sampling:
 
 <p align="center">
   <img src="results/print_from_training_process_1.png" alt="Step 1055 — Initial Surface Formation" width="900" />
@@ -24,7 +24,7 @@ Primitive boundaries (sphere, box, torus, capped cylinder) emerge from uniform a
 ---
 
 #### 2. High-Frequency Surface Refinement (Step 2135 — MSE Loss: 0.000297)
-High-frequency surface details refine as coordinate cross-attention grounds spatially onto learnable scene embeddings:
+Surface details refine as coordinate cross-attention grounds spatially onto learnable scene embeddings:
 
 <p align="center">
   <img src="results/print_from_training_process_2.png" alt="Step 2135 — High-Frequency Refinement" width="900" />
@@ -33,7 +33,7 @@ High-frequency surface details refine as coordinate cross-attention grounds spat
 ---
 
 #### 3. Final 3D Scene Isosurface Reconstruction
-The network generates smooth, closed 3D isosurface meshes matching the ground truth 4-primitive scene:
+The network produces smooth, closed 3D isosurface meshes matching the ground truth 4-primitive scene:
 
 <p align="center">
   <img src="results/print_from_training_process_final_result_reconstruction.png" alt="Final Reconstruction" width="900" />
@@ -42,7 +42,7 @@ The network generates smooth, closed 3D isosurface meshes matching the ground tr
 ---
 
 #### 4. Vector SDF Donut-Hole Failure (before fix)
-The `VectorSDFModel` with an autograd-derived direction head failed to learn the torus rim interior (the donut hole). The learned direction head + chaos-game surface sampling fix this:
+`VectorSDFModel` with an autograd-derived direction head failed to learn the torus rim interior. The learned direction head plus chaos-game surface sampling fixes this:
 
 <p align="center">
   <img src="results/current_vector_sdf_model_has_trouble_with_donut_hole.png" alt="Vector SDF Donut-Hole Failure" width="900" />
@@ -51,7 +51,7 @@ The `VectorSDFModel` with an autograd-derived direction head failed to learn the
 ---
 
 #### 5. Accelerated Training Convergence
-Coarse-to-fine Fourier band annealing + chaos-game surface sampling vs. uniform rejection sampling — faster convergence and better geometric fidelity:
+Coarse-to-fine Fourier band annealing plus chaos-game surface sampling versus uniform rejection sampling gives faster convergence and better geometric fidelity:
 
 <p align="center">
   <img src="results/way_faster_training_results.png" alt="Accelerated Training Convergence" width="900" />
@@ -63,33 +63,33 @@ Coarse-to-fine Fourier band annealing + chaos-game surface sampling vs. uniform 
 
 ### Models
 
-- **CrossAttnSDFModel (scalar SDF)**: Coordinate tokens cross-attend to learnable scene object token embeddings via `nn.MultiheadAttention` (batch_first, pre-norm LayerNorm). No self-attention over object tokens — only coordinate→object cross-attention. Shared backbone extracted into `_forward_features`; both `forward` (distance head) and `predict_scalar` reuse it.
-- **VectorSDFModel (vector field)**: Extends `CrossAttnSDFModel` with a learned direction head: `v = normalize(vector_head(feats)) * dist_head(feats)`. Guarantees `|v| == |f|` by construction, provides first-order CPU-differentiable gradients (replaces dead autograd path), and enables direct direction supervision into the shared backbone via `compute_vector_sdf_loss`.
-- **Scene Summary Token (`use_scene_token`)**: Opt-in learnable token prepended to object embeddings, giving coordinates a global scene context without breaking position invariance.
-- **SDFMLP Baseline**: Flexible Multi-Layer Perceptron neural field with optional Fourier feature encodings, SiLU activations, and configurable `LayerNorm` / `WeightNorm` (via `parametrizations`).
+- **CrossAttnSDFModel (scalar SDF)**: Coordinate tokens cross-attend to learnable scene object token embeddings via `nn.MultiheadAttention` (`batch_first`, pre-norm LayerNorm). Object tokens do not self-attend; only coordinate-to-object cross-attention occurs. Shared backbone is extracted into `_forward_features`; both `forward` and `predict_scalar` reuse it.
+- **VectorSDFModel (vector field)**: Extends `CrossAttnSDFModel` with a learned direction head: `v = normalize(vector_head(feats)) * dist_head(feats)`. This guarantees `|v| == |f|` by construction, provides first-order CPU-differentiable gradients, and enables direct direction supervision via `compute_vector_sdf_loss`.
+- **Scene Summary Token (`use_scene_token`)**: Opt-in learnable token prepended to object embeddings, giving coordinates global scene context without breaking position invariance.
+- **SDFMLP Baseline**: Flexible MLP neural field with optional Fourier feature encodings, SiLU activations, and configurable `LayerNorm` / `WeightNorm` via `parametrizations`.
 
 ### Fourier Positional Encoding
 
 - **`FourierPositionEncoding`** supports static and learnable frequency bands.
-- **Coarse-to-fine annealing**: `active_bands` ramps from `fourier_bands_start` (default 4) to `fourier_bands_end` over the first `fourier_anneal_fraction` (default 0.8) of training. Implemented as a smooth per-band ramp `weights = clamp(active_bands - arange(B), 0, 1)` — accepts float anneal values without hard slicing.
+- **Coarse-to-fine annealing**: `active_bands` ramps from `fourier_bands_start` (default 4) to `fourier_bands_end` over the first `fourier_anneal_fraction` (default 0.8) of training. Implemented as a smooth per-band ramp `weights = clamp(active_bands - arange(B), 0, 1)` so it accepts float anneal values without hard slicing.
 
 ### Multi-Term SDF Loss & Metrics
 
-- **`compute_combined_sdf_loss`** (scalar): distance (MSE + 0.5×L1), Eikonal, normal alignment.
-- **`compute_vector_sdf_loss`** (vector): vector L2, cosine direction, magnitude MSE, Eikonal, normal alignment, and a **consistency loss** (predicted direction vs. finite-difference normals of the scalar field). Finite-difference normals are computed once and reused across terms.
-- **Eikonal**: adaptive ε(p) directional finite differences (`eps = clamp(α·|f(p)|, ε_min, ε_max)`) — 1st-order CPU-differentiable, no autograd graph overhead. Exact autograd mode (`use_autograd=True`) available via `torch.autograd.grad`.
+- **`compute_combined_sdf_loss`** (scalar): distance (MSE + 0.5xL1), Eikonal, normal alignment.
+- **`compute_vector_sdf_loss`** (vector): vector L2, cosine direction, magnitude MSE, Eikonal, normal alignment, and a consistency loss comparing predicted direction to finite-difference normals of the scalar field. Finite-difference normals are computed once and reused across terms.
+- **Eikonal**: adaptive epsilon directional finite differences (`eps = clamp(alpha*|f(p)|, eps_min, eps_max)`), first-order CPU-differentiable with no autograd graph overhead. Exact autograd mode is available via `use_autograd=True` and `torch.autograd.grad`.
 
 ### Dataset & Sampling
 
 - **`Scene4PrimitivesDataset`**: Generates 4-primitive scenes (sphere, box, torus, capped cylinder) with configurable sampling:
-  - **Chaos-game sampler (default)**: Iterative surface projection — seed random particles, project onto the zero level set via the analytic SDF (`p ← p − f(p)·n̂(p)`), jitter for exploration, warm up, then emit. Dense surface coverage including thin structures (torus rim interior) that rejection sampling statistically misses. Parameterized by `chaos_iters` (default 4) and `chaos_jitter` (default 0.05).
+  - **Chaos-game sampler (default)**: Iterative surface projection — seed random particles, project onto the zero level set via the analytic SDF (`p <- p - f(p)*n_hat(p)`), jitter for exploration, warm up, then emit. This covers thin structures like the torus rim interior that rejection sampling can miss. Controlled by `chaos_iters` (default 4) and `chaos_jitter` (default 0.05).
   - **Rejection sampler (fallback)**: Uniform rejection inside the `surface_eps` band.
-  - 50% near-surface / 50% uniform split by default; optional analytical surface normals via central finite differences.
+  - Default 50% near-surface / 50% uniform split; optional analytical surface normals via central finite differences.
 - **`build_scene_dataloader`**: DataLoader factory forwarding all dataset parameters.
 
 ### Trainer
 
-- **`SceneTrainer`**: Joint optimization of model + learnable embeddings with:
+- **`SceneTrainer`**: Joint optimization of model and learnable embeddings with:
   - Coarse-to-fine Fourier band annealing (`_apply_fourier_anneal`).
   - Vector-model scalar-only warmup (`vector_warmup_steps`).
   - Per-term loss logging (`log_every_steps`) with detached scalar values.
@@ -97,7 +97,7 @@ Coarse-to-fine Fourier band annealing + chaos-game surface sampling vs. uniform 
 
 ### Rendering & Export
 
-- **`create_sdf3_wrapper`**: Wraps any model into `sdf.d3.SDF3` with automatic point batching (default 65536). Handles `CrossAttnSDFModel`, `VectorSDFModel` (via `predict_scalar`), and `SDFMLP`.
+- **`create_sdf3_wrapper`**: Wraps any model into `sdf.d3.SDF3` with automatic point batching (default 65536). Supports `CrossAttnSDFModel`, `VectorSDFModel` via `predict_scalar`, and `SDFMLP`.
 - **2D Slice** (`render_sdf_slice`): Fast cross-sections across X, Y, or Z planes.
 - **3D Isosurface** (`render_sdf_3d`): Marching Cubes mesh extraction.
 - **Mesh Export** (`export_sdf_mesh`): STL / OBJ export.
@@ -106,13 +106,13 @@ Coarse-to-fine Fourier band annealing + chaos-game surface sampling vs. uniform 
 ### CLI & Scripts
 
 - **`sdfmodel` CLI** (unified): `train`, `info`, `render`, `train-scene`, `eval-sdfmodel`.
-- **`scripts/train_scene.py`**: Scene reconstruction with live viewer, checkpoint saving, STL export. Flags: `--model-type`, `--sampler`, `--chaos-iters`, `--fourier-bands`, `--use-scene-token`, `--vector-warmup`, `--log-every`, `--surface-eps`, `--num-tokens`.
-- **`scripts/render_sdf.py`**: Model inference, slice/mesh rendering, STL export. Reconstructs model architecture from checkpoint flags (hidden_dim, num_layers, fourier_num_bands, use_scene_token, num_tokens).
+- **`scripts/train_scene.py`**: Scene reconstruction with live viewer, checkpoint saving, and STL export. Flags: `--model-type`, `--sampler`, `--chaos-iters`, `--fourier-bands`, `--use-scene-token`, `--vector-warmup`, `--log-every`, `--surface-eps`, `--num-tokens`.
+- **`scripts/render_sdf.py`**: Model inference, slice/mesh rendering, and STL export. Reconstructs model architecture from checkpoint flags: `hidden_dim`, `num_layers`, `fourier_num_bands`, `use_scene_token`, `num_tokens`.
 - **`scripts/eval_sdfmodel.py`**: Interactive embedding interpolation GUI.
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```text
 SDFModel/
@@ -181,18 +181,16 @@ SDFModel/
 ## Installation & Setup
 
 ### Prerequisites
-- Python ≥3.11, <3.14
-- PyTorch 2.13+
-- Linux (CPU-only; uses `pytorch` CPU index and PyG `torch-2.12.1+cpu` find-links)
 
-### Installation via `uv` (Recommended)
+- Python 3.11 or later, earlier than 3.14
+- PyTorch 2.13 or later
+- Linux, CPU-only; uses the `pytorch` CPU index and PyG `torch-2.12.1+cpu` find-links
+
+### Installation via `uv` (recommended)
 
 ```bash
-# Clone repository
 git clone https://github.com/your-username/SDFModel.git
 cd SDFModel
-
-# Install dependencies and sync virtual environment
 uv sync
 ```
 
@@ -208,7 +206,7 @@ pip install -e .
 
 ### 1. Scene Reconstruction Training
 
-Train `CrossAttnSDFModel` or `VectorSDFModel` and learnable primitive embeddings to reconstruct a 3D scene containing a sphere, box, torus, and cylinder:
+Train `CrossAttnSDFModel` or `VectorSDFModel` with learnable primitive embeddings to reconstruct a 3D scene containing a sphere, box, torus, and cylinder:
 
 ```bash
 # Scalar SDF with live 3D mesh viewer, checkpoint saving, and STL export
@@ -225,16 +223,17 @@ python scripts/train_scene.py --sampler chaos_game --chaos-iters 4 --surface-eps
 ```
 
 Key flags:
+
 | Flag | Default | Description |
-|------|---------|-------------|
+| --- | --- | --- |
 | `--model-type` | `scalar_sdf` | `scalar_sdf` or `vector_sdf` |
 | `--hidden-dim` | 64 | Model hidden dimension |
 | `--num-layers` | 4 | Transformer layers |
 | `--num-tokens` | 8 | Learnable object token count |
-| `--fourier-bands` | 8 | Fourier band count (annealed from 4) |
+| `--fourier-bands` | 8 | Fourier band count, annealed from 4 |
 | `--use-scene-token` | off | Add learnable scene summary token |
 | `--sampler` | `chaos_game` | Near-surface sampler: `chaos_game` or `rejection` |
-| `--chaos-iters` | 4 | Chaos-game projection + jitter rounds |
+| `--chaos-iters` | 4 | Chaos-game projection and jitter rounds |
 | `--surface-eps` | 0.1 | Near-surface band half-width |
 | `--vector-warmup` | 0 | Scalar-only warmup steps for vector model |
 | `--log-every` | 10 | Print loss breakdown every N steps |
@@ -282,7 +281,7 @@ sdfmodel eval-sdfmodel scene.pt --view 3d
 
 ### 4. Standard Model Training & Evaluation
 
-Train baseline models (e.g., `SDFMLP`) configured via YAML:
+Train baseline models, for example `SDFMLP`, configured via YAML:
 
 ```bash
 # Train baseline model using CLI
@@ -294,7 +293,7 @@ sdfmodel info
 
 ---
 
-## 🧪 Running Tests
+## Running Tests
 
 Run the full behavioral pytest test suite:
 
@@ -308,10 +307,10 @@ Or directly:
 .venv/bin/python -m pytest tests/ -q
 ```
 
-Current suite: **76 tests** covering model contracts, dataset sampling (chaos-game + rejection), trainer warmup/annealing/logging, vector loss terms (L2, cosine, magnitude MSE, Eikonal, normal, consistency), rendering wrappers, and CLI argument wiring.
+Current suite: **76 tests** covering model contracts, dataset sampling (chaos-game and rejection), trainer warmup/annealing/logging, vector loss terms (L2, cosine, magnitude MSE, Eikonal, normal, consistency), rendering wrappers, and CLI argument wiring.
 
 ---
 
-## 📜 License
+## License
 
 Distributed under the Apache 2.0 License. See `LICENSE` for details.
